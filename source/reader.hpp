@@ -118,7 +118,7 @@ class reader
 
         //
         options_ptr properties();
-        std::string property( std::string name );
+        std::string property( std::string name ) const;
         void property( std::string name, std::string value );
 
         void set_case( std::string val );
@@ -126,24 +126,24 @@ class reader
         void set_precision( unsigned int val );
 
         //
-        Table table();
-        Column column( Index i );
-        Columns columns();
+        Table table() const;
+        Column column( Index i ) const;
+        Columns columns() const;
 
         //
-        Field field( Index i );
-        Fields fields();
+        Field field( Index i ) const;
+        Fields fields() const;
 
         //
-        size_t num_rows();
-        size_t num_cols();
+        size_t num_rows() const;
+        size_t num_cols() const;
 
         //
-        bool is_open();
+        bool is_open() const;
 
         //
-        std::string name( Index col );
-        std::string value( Index col, Index row ); 
+        std::string name( Index col ) const;
+        std::string value( Index col, Index row ) const; 
 
         //
         std::string key( std::string id, Index row );
@@ -161,20 +161,20 @@ class reader
         FileReader read_;
         Table table_;
 
-        options_ptr option_;
+        mutable options_ptr option_;
 
         //
-        void init();
+        void init() const;
 
         //
-        std::string use_case( std::string s );
-        std::string to_lower( std::string s );
-        std::string to_upper( std::string s );
+        std::string use_case( std::string s ) const;
+        std::string to_lower( std::string s ) const;
+        std::string to_upper( std::string s ) const;
 
         //
-        std::string trim( std::string s );
-        std::string ltrim( std::string s );
-        std::string rtrim( std::string s );
+        std::string trim( std::string s ) const;
+        std::string ltrim( std::string s ) const;
+        std::string rtrim( std::string s ) const;
 
         //
         std::string uuid( int sz = 0 );

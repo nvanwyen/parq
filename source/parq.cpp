@@ -21,7 +21,8 @@ void print_usage(const char* program_name) {
     std::cout << "  --csv               Output in CSV format\n";
     std::cout << "  --xml               Output in XML format\n";
     std::cout << "  --limit <n>         Limit output to first n rows\n";
-    std::cout << "  --columns           Show only column information\n";
+    std::cout << "  --metadata          Show only column metadata information\n";
+    std::cout << "  --columns <list>    Show only specified columns (comma-delimited)\n";
     std::cout << "  --case <upper|lower> Set output case (default: lower)\n";
     std::cout << "  --help              Show this help message\n";
     std::cout << "\nNote: Output format options (--tabular, --json, --csv, --xml) are mutually exclusive.\n";
@@ -43,6 +44,58 @@ std::string escape_xml(const std::string& data) {
     return buffer;
 }
 
+std::vector<std::string> parse_column_list(const std::string& column_list) {
+    std::vector<std::string> columns;
+    std::string current_column;
+    
+    for (char c : column_list) {
+        if (c == ',') {
+            if (!current_column.empty()) {
+                // Trim whitespace
+                size_t start = current_column.find_first_not_of(" \t");
+                size_t end = current_column.find_last_not_of(" \t");
+                if (start != std::string::npos && end != std::string::npos) {
+                    columns.push_back(current_column.substr(start, end - start + 1));
+                }
+                current_column.clear();
+            }
+        } else {
+            current_column += c;
+        }
+    }
+    
+    // Add the last column
+    if (!current_column.empty()) {
+        size_t start = current_column.find_first_not_of(" \t");
+        size_t end = current_column.find_last_not_of(" \t");
+        if (start != std::string::npos && end != std::string::npos) {
+            columns.push_back(current_column.substr(start, end - start + 1));
+        }
+    }
+    
+    return columns;
+}
+
+std::vector<size_t> get_column_indices(const mti::parq::reader& reader, const std::vector<std::string>& column_names) {
+    std::vector<size_t> indices;
+    
+    for (const std::string& name : column_names) {
+        bool found = false;
+        for (size_t i = 0; i < reader.num_cols(); i++) {
+            if (reader.name(i) == name) {
+                indices.push_back(i);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            std::cerr << "Warning: Column '" << name << "' not found in parquet file\n";
+        }
+    }
+    
+    return indices;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -52,7 +105,8 @@ int main(int argc, char* argv[]) {
     std::string filename = argv[1];
     OutputFormat output_format = OutputFormat::TABULAR;
     int format_count = 0;
-    bool columns_only = false;
+    bool metadata_only = false;
+    std::vector<std::string> selected_columns;
     size_t limit = 0;
     bool has_limit = false;
     std::string case_option = "lower";
@@ -71,8 +125,10 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--xml") {
             output_format = OutputFormat::XML;
             format_count++;
-        } else if (arg == "--columns") {
-            columns_only = true;
+        } else if (arg == "--metadata") {
+            metadata_only = true;
+        } else if (arg == "--columns" && i + 1 < argc) {
+            selected_columns = parse_column_list(argv[++i]);
         } else if (arg == "--limit" && i + 1 < argc) {
             limit = std::atoi(argv[++i]);
             has_limit = true;
@@ -99,7 +155,7 @@ int main(int argc, char* argv[]) {
         std::cout << "Rows: " << parquet_reader.num_rows() << "\n";
         std::cout << "Columns: " << parquet_reader.num_cols() << "\n\n";
 
-        if (columns_only) {
+        if (metadata_only) {
             std::cout << "Column Information:\n";
             for (size_t i = 0; i < parquet_reader.num_cols(); i++) {
                 auto field = parquet_reader.field(i);
@@ -110,6 +166,21 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
+        // Get column indices if specific columns are requested
+        std::vector<size_t> column_indices;
+        if (!selected_columns.empty()) {
+            column_indices = get_column_indices(parquet_reader, selected_columns);
+            if (column_indices.empty()) {
+                std::cerr << "Error: No valid columns found.\n";
+                return 1;
+            }
+        } else {
+            // Use all columns
+            for (size_t i = 0; i < parquet_reader.num_cols(); i++) {
+                column_indices.push_back(i);
+            }
+        }
+
         size_t rows_to_process = parquet_reader.num_rows();
         if (has_limit && limit < rows_to_process) {
             rows_to_process = limit;
@@ -117,43 +188,43 @@ int main(int argc, char* argv[]) {
 
         switch (output_format) {
             case OutputFormat::TABULAR: {
-                std::vector<size_t> col_widths(parquet_reader.num_cols());
+                std::vector<size_t> col_widths(column_indices.size());
                 
-                for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                    col_widths[col] = parquet_reader.name(col).length();
+                for (size_t i = 0; i < column_indices.size(); i++) {
+                    col_widths[i] = parquet_reader.name(column_indices[i]).length();
                 }
                 
                 for (size_t row = 0; row < rows_to_process; row++) {
-                    for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                        size_t len = parquet_reader.value(col, row).length();
-                        if (len > col_widths[col]) {
-                            col_widths[col] = len;
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        size_t len = parquet_reader.value(column_indices[i], row).length();
+                        if (len > col_widths[i]) {
+                            col_widths[i] = len;
                         }
                     }
                 }
                 
                 auto print_separator = [&]() {
                     std::cout << "+";
-                    for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                        std::cout << std::string(col_widths[col] + 2, '-') << "+";
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        std::cout << std::string(col_widths[i] + 2, '-') << "+";
                     }
                     std::cout << "\n";
                 };
                 
                 print_separator();
                 std::cout << "|";
-                for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                    std::cout << " " << std::left << std::setw(col_widths[col]) 
-                              << parquet_reader.name(col) << " |";
+                for (size_t i = 0; i < column_indices.size(); i++) {
+                    std::cout << " " << std::left << std::setw(col_widths[i]) 
+                              << parquet_reader.name(column_indices[i]) << " |";
                 }
                 std::cout << "\n";
                 print_separator();
                 
                 for (size_t row = 0; row < rows_to_process; row++) {
                     std::cout << "|";
-                    for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                        std::cout << " " << std::left << std::setw(col_widths[col]) 
-                                  << parquet_reader.value(col, row) << " |";
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        std::cout << " " << std::left << std::setw(col_widths[i]) 
+                                  << parquet_reader.value(column_indices[i], row) << " |";
                     }
                     std::cout << "\n";
                 }
@@ -164,7 +235,13 @@ int main(int argc, char* argv[]) {
             case OutputFormat::JSON: {
                 std::cout << "[\n";
                 for (size_t row = 0; row < rows_to_process; row++) {
-                    std::cout << "  " << parquet_reader.json(row);
+                    std::cout << "  {\n";
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        if (i > 0) std::cout << ",\n";
+                        std::cout << "    \"" << parquet_reader.name(column_indices[i]) << "\": \"" 
+                                  << parquet_reader.value(column_indices[i], row) << "\"";
+                    }
+                    std::cout << "\n  }";
                     if (row < rows_to_process - 1) {
                         std::cout << ",";
                     }
@@ -175,16 +252,16 @@ int main(int argc, char* argv[]) {
             }
             
             case OutputFormat::CSV: {
-                for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                    if (col > 0) std::cout << ",";
-                    std::cout << "\"" << parquet_reader.name(col) << "\"";
+                for (size_t i = 0; i < column_indices.size(); i++) {
+                    if (i > 0) std::cout << ",";
+                    std::cout << "\"" << parquet_reader.name(column_indices[i]) << "\"";
                 }
                 std::cout << "\n";
 
                 for (size_t row = 0; row < rows_to_process; row++) {
-                    for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                        if (col > 0) std::cout << ",";
-                        std::string val = parquet_reader.value(col, row);
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        if (i > 0) std::cout << ",";
+                        std::string val = parquet_reader.value(column_indices[i], row);
                         if (val.find_first_of(",\"\n\r") != std::string::npos) {
                             std::cout << "\"";
                             for (char c : val) {
@@ -213,9 +290,9 @@ int main(int argc, char* argv[]) {
                 
                 for (size_t row = 0; row < rows_to_process; row++) {
                     std::cout << "    <record row=\"" << row << "\">\n";
-                    for (size_t col = 0; col < parquet_reader.num_cols(); col++) {
-                        std::string name = parquet_reader.name(col);
-                        std::string value = parquet_reader.value(col, row);
+                    for (size_t i = 0; i < column_indices.size(); i++) {
+                        std::string name = parquet_reader.name(column_indices[i]);
+                        std::string value = parquet_reader.value(column_indices[i], row);
                         std::cout << "      <" << name << ">" 
                                   << escape_xml(value) 
                                   << "</" << name << ">\n";

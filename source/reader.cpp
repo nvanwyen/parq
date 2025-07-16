@@ -101,7 +101,7 @@ reader::options_ptr reader::properties()
 }
 
 //
-std::string reader::property( std::string name )
+std::string reader::property( std::string name ) const
 {
     std::string val;
 
@@ -147,12 +147,12 @@ void reader::set_precision( unsigned int val )
 }
 
 //
-reader::Table reader::table()
+reader::Table reader::table() const
 {
     return table_;
 }
 
-reader::Column reader::column( Index i )
+reader::Column reader::column( Index i ) const
 {
     //
     if ( ! is_open() )
@@ -163,7 +163,7 @@ reader::Column reader::column( Index i )
 }
 
 //
-reader::Columns reader::columns()
+reader::Columns reader::columns() const
 {
     //
     if ( ! is_open() )
@@ -174,7 +174,7 @@ reader::Columns reader::columns()
 }
 
 //
-reader::Field reader::field( reader::Index i )
+reader::Field reader::field( reader::Index i ) const
 {
     //
     if ( ! is_open() )
@@ -185,7 +185,7 @@ reader::Field reader::field( reader::Index i )
 }
 
 //
-reader::Fields reader::fields()
+reader::Fields reader::fields() const
 {
     //
     if ( ! is_open() )
@@ -196,7 +196,7 @@ reader::Fields reader::fields()
 }
 
 //
-size_t reader::num_rows()
+size_t reader::num_rows() const
 {
     //
     if ( table_ != nullptr )
@@ -206,7 +206,7 @@ size_t reader::num_rows()
 }
 
 //
-size_t reader::num_cols()
+size_t reader::num_cols() const
 {
     //
     if ( table_ != nullptr )
@@ -216,14 +216,14 @@ size_t reader::num_cols()
 }
 
 //
-bool reader::is_open()
+bool reader::is_open() const
 {
     //
     return ( table_ != nullptr );
 }
 
 //
-std::string reader::name( reader::Index col )
+std::string reader::name( reader::Index col ) const
 {
     reader::Field fld = field( col );
 
@@ -236,7 +236,7 @@ std::string reader::name( reader::Index col )
 }
 
 //
-std::string reader::value( reader::Index col, reader::Index row )
+std::string reader::value( reader::Index col, reader::Index row ) const
 {
     std::string val = "";
 
@@ -728,7 +728,7 @@ std::string reader::to_type( reader::Kind type )
 }
 
 //
-void reader::init()
+void reader::init() const
 {
     //
     if ( option_ == nullptr )
@@ -739,22 +739,15 @@ void reader::init()
         //
         if ( option_ != nullptr )
         {
-            property( PROP_CASE, DEFAULT_CASE );
-
-            set_case( DEFAULT_CASE );
-            set_scale( DEFAULT_SCALE );
-            set_precision( DEFAULT_PRECISION );
-
-            // option_->insert( { PROP_CASE, DEFAULT_CASE } );
-            // option_->insert( { PROP_SCALE, std::to_string( DEFAULT_SCALE ) } );
-            // option_->insert( { PROP_PRECISION, std::to_string( DEFAULT_PRECISION ) } );
-            // // ... add more ...
+            option_->insert( { PROP_CASE, DEFAULT_CASE } );
+            option_->insert( { PROP_SCALE, std::to_string( DEFAULT_SCALE ) } );
+            option_->insert( { PROP_PRECISION, std::to_string( DEFAULT_PRECISION ) } );
         }
     }
 }
 
 //
-std::string reader::use_case( std::string s )
+std::string reader::use_case( std::string s ) const
 {
     if ( to_lower( trim( property( "case" ) ) ) == "lower" )
         return to_lower( trim( s ) );
@@ -765,27 +758,27 @@ std::string reader::use_case( std::string s )
 }
 
 //
-std::string reader::to_lower( std::string s )
+std::string reader::to_lower( std::string s ) const
 {
     std::transform( s.begin(), s.end(), s.begin(), ::tolower );
     return s;
 }
 
 //
-std::string reader::to_upper( std::string s )
+std::string reader::to_upper( std::string s ) const
 {
     std::transform( s.begin(), s.end(), s.begin(), ::toupper );
     return s;
 }
 
 //
-std::string reader::trim( std::string s )
+std::string reader::trim( std::string s ) const
 {
     return ltrim( rtrim( s ) );
 }
 
 //
-std::string reader::ltrim( std::string s )
+std::string reader::ltrim( std::string s ) const
 {
     //
     s.erase( s.begin(), std::find_if( s.begin(),
@@ -799,7 +792,7 @@ std::string reader::ltrim( std::string s )
 }
 
 //
-std::string reader::rtrim( std::string s )
+std::string reader::rtrim( std::string s ) const
 {
     s.erase( std::find_if( s.rbegin(),
                            s.rend(),
