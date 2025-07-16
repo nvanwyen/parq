@@ -1,0 +1,41 @@
+#!/bin/bash
+
+cd /projects/parq
+echo "Building parq reader..."
+
+if [[ ${1} == "clean" ]] ; then
+
+    if [ -d "build" ]; then
+
+        rm -Rf build
+
+        echo "Cleaned"
+        exit 0
+
+    else
+
+        echo "Already clean"
+        exit 0
+
+    fi
+
+fi
+
+if [ ! -d "build" ]; then
+    mkdir build
+else
+    rm -Rf build && mkdir build
+fi
+
+#
+cd build && cmake .. && make
+
+#
+if [ $? -eq 0 ]; then
+    echo "Build successful!"
+else
+    echo "Build failed!"
+    exit 1
+fi
+
+exit 0
