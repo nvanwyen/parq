@@ -16,15 +16,15 @@ enum class OutputFormat {
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " <parquet_file> [options]\n";
     std::cout << "Options:\n";
-    std::cout << "  --tabular           Output in tabular format (default)\n";
-    std::cout << "  --json              Output in JSON format\n";
-    std::cout << "  --csv               Output in CSV format\n";
-    std::cout << "  --xml               Output in XML format\n";
-    std::cout << "  --limit <n>         Limit output to first n rows\n";
-    std::cout << "  --metadata          Show only column metadata information\n";
-    std::cout << "  --columns <list>    Show only specified columns (comma-delimited)\n";
+    std::cout << "  --tabular            Output in tabular format (default)\n";
+    std::cout << "  --json               Output in JSON format\n";
+    std::cout << "  --csv                Output in CSV format\n";
+    std::cout << "  --xml                Output in XML format\n";
+    std::cout << "  --limit <n>          Limit output to first n rows\n";
+    std::cout << "  --metadata           Show only column metadata information\n";
+    std::cout << "  --columns <list>     Show only specified columns (comma-delimited)\n";
     std::cout << "  --case <upper|lower> Set output case (default: lower)\n";
-    std::cout << "  --help              Show this help message\n";
+    std::cout << "  --help               Show this help message\n";
     std::cout << "\nNote: Output format options (--tabular, --json, --csv, --xml) are mutually exclusive.\n";
 }
 

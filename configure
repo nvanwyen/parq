@@ -3,6 +3,14 @@
 cd /projects/parq
 echo "Building parq reader..."
 
+# Check for Snappy library
+if ! pkg-config --exists snappy 2>/dev/null && ! [ -f /usr/local/include/snappy.h ] && ! [ -f /opt/homebrew/include/snappy.h ]; then
+    echo "Warning: Snappy library not found. Install it for compressed Parquet support:"
+    echo "  Ubuntu/Debian: sudo apt-get install libsnappy-dev"
+    echo "  macOS: brew install snappy"
+    echo "  RHEL/CentOS: sudo yum install snappy-devel"
+fi
+
 if [[ ${1} == "clean" ]] ; then
 
     if [ -d "build" ]; then
