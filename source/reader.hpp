@@ -16,6 +16,8 @@
 #include <parquet/exception.h>
 #include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
+#include <parquet/file_reader.h>
+#include <parquet/metadata.h>
 #include <arrow/util/formatting.h>
 
 //
@@ -143,7 +145,16 @@ class reader
 
         //
         std::string name( Index col ) const;
-        std::string value( Index col, Index row ) const; 
+        std::string value( Index col, Index row ) const;
+        
+        //
+        std::string compression_type( Index col ) const;
+        
+        //
+        size_t num_row_groups() const;
+        std::string created_by() const;
+        int64_t file_size() const;
+        std::string file_checksum() const; 
 
         //
         std::string key( std::string id, Index row );
@@ -160,6 +171,7 @@ class reader
     private:
         FileReader read_;
         Table table_;
+        std::string filename_;
 
         mutable options_ptr option_;
 

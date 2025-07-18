@@ -4,6 +4,10 @@
 #include <random>
 #include <algorithm>
 #include <stdexcept>
+#include <sstream>
+#include <fstream>
+#include <openssl/evp.h>
+#include <iomanip>
 //
 #include <arrow/array/array_decimal.h>
 //
@@ -61,6 +65,9 @@ void reader::open( const char* file )
 
                 //
                 PARQUET_THROW_NOT_OK( read_->ReadTable( &table_ ) );
+                
+                // Store filename for later use
+                filename_ = file;
             }
             catch ( parquet::ParquetException& ex )
             {
@@ -551,6 +558,175 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                                              + "] out of range!" );
 
     return val;
+}
+
+//
+std::string reader::compression_type( reader::Index col ) const
+{
+    std::string compression = "none";
+    
+    try {
+        if (read_ != nullptr) {
+            // Get the parquet file reader
+            auto parquet_reader = read_->parquet_reader();
+            if (parquet_reader != nullptr) {
+                // Get file metadata
+                auto file_metadata = parquet_reader->metadata();
+                if (file_metadata != nullptr && col < static_cast<Index>(file_metadata->num_row_groups())) {
+                    // Get the first row group to check compression
+                    auto row_group = file_metadata->RowGroup(0);
+                    if (row_group != nullptr && col < static_cast<Index>(row_group->num_columns())) {
+                        auto column_chunk = row_group->ColumnChunk(col);
+                        if (column_chunk != nullptr) {
+                            // Get compression codec
+                            switch (column_chunk->compression()) {
+                                case parquet::Compression::UNCOMPRESSED:
+                                    compression = "none";
+                                    break;
+                                case parquet::Compression::SNAPPY:
+                                    compression = "snappy";
+                                    break;
+                                case parquet::Compression::GZIP:
+                                    compression = "gzip";
+                                    break;
+                                case parquet::Compression::LZO:
+                                    compression = "lzo";
+                                    break;
+                                case parquet::Compression::BROTLI:
+                                    compression = "brotli";
+                                    break;
+                                case parquet::Compression::LZ4:
+                                    compression = "lz4";
+                                    break;
+                                case parquet::Compression::ZSTD:
+                                    compression = "zstd";
+                                    break;
+                                default:
+                                    compression = "unknown";
+                                    break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (...) {
+        // If we can't determine compression, return "unknown"
+        compression = "unknown";
+    }
+    
+    return compression;
+}
+
+//
+size_t reader::num_row_groups() const
+{
+    size_t count = 0;
+    
+    try {
+        if (read_ != nullptr) {
+            auto parquet_reader = read_->parquet_reader();
+            if (parquet_reader != nullptr) {
+                auto file_metadata = parquet_reader->metadata();
+                if (file_metadata != nullptr) {
+                    count = file_metadata->num_row_groups();
+                }
+            }
+        }
+    } catch (...) {
+        // Return 0 if we can't determine
+    }
+    
+    return count;
+}
+
+//
+std::string reader::created_by() const
+{
+    std::string created_by = "unknown";
+    
+    try {
+        if (read_ != nullptr) {
+            auto parquet_reader = read_->parquet_reader();
+            if (parquet_reader != nullptr) {
+                auto file_metadata = parquet_reader->metadata();
+                if (file_metadata != nullptr) {
+                    created_by = file_metadata->created_by();
+                }
+            }
+        }
+    } catch (...) {
+        // Return "unknown" if we can't determine
+    }
+    
+    return created_by;
+}
+
+//
+int64_t reader::file_size() const
+{
+    int64_t size = -1;
+    
+    try {
+        if (read_ != nullptr) {
+            auto parquet_reader = read_->parquet_reader();
+            if (parquet_reader != nullptr) {
+                auto file_metadata = parquet_reader->metadata();
+                if (file_metadata != nullptr) {
+                    size = file_metadata->size();
+                }
+            }
+        }
+    } catch (...) {
+        // Return -1 if we can't determine
+    }
+    
+    return size;
+}
+
+//
+std::string reader::file_checksum() const
+{
+    std::string checksum = "";
+    
+    if (!filename_.empty()) {
+        std::ifstream file(filename_, std::ios::binary);
+        if (file.is_open()) {
+            // Use the modern EVP API for OpenSSL 3.0
+            EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+            if (mdctx != nullptr) {
+                if (EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) == 1) {
+                    const size_t bufferSize = 8192;
+                    char buffer[bufferSize];
+                    
+                    while (file.read(buffer, bufferSize)) {
+                        EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    }
+                    // Process any remaining bytes
+                    if (file.gcount() > 0) {
+                        EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    }
+                    
+                    unsigned char hash[EVP_MAX_MD_SIZE];
+                    unsigned int hash_len;
+                    
+                    if (EVP_DigestFinal_ex(mdctx, hash, &hash_len) == 1) {
+                        // Convert to hex string
+                        std::stringstream ss;
+                        for (unsigned int i = 0; i < hash_len; i++) {
+                            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+                        }
+                        checksum = ss.str();
+                    }
+                }
+                EVP_MD_CTX_free(mdctx);
+            }
+            
+            file.close();
+        }
+    }
+    
+    return checksum.empty() ? "unavailable" : checksum;
 }
 
 //
