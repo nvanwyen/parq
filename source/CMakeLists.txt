@@ -38,6 +38,24 @@ target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_app})
 
 #
+file(MAKE_DIRECTORY "${PROJECT_HOME}/")
+file(MAKE_DIRECTORY "${PROJECT_HOME}/bin/")
+file(MAKE_DIRECTORY "${PROJECT_HOME}/lib/")
+
+#
+set(PROJECT_WRAPPER ${PROJECT_HOME}/${PROJECT_NAME})
+string(TOLOWER "${PROJECT_WRAPPER}" PROJECT_WRAPPER)
+#
+file(WRITE "${PROJECT_WRAPPER}"
+    "#!/bin/bash\n"
+    "\n"
+    "dir=\"\$(cd \"\$(dirname \"\$0\")\" ; pwd -P)\"\n"
+    "LD_LIBRARY_PATH=\${dir}/lib:\${LD_LIBRARY_PATH}:.: && \${dir}/bin/parq \${@}")
+#
+file(CHMOD "${PROJECT_WRAPPER}" PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE)
+
+#
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND echo "[ .. ] Creating symbloic link ${PROJECT_NAME} for ${_app}"
     COMMAND ${CMAKE_COMMAND} -E create_symlink ${_app} ${PROJECT_NAME})
