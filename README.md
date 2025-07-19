@@ -353,7 +353,7 @@ Column Information:
       9 | clarity                | STRING            | none         |
 ```
 
-# Copyright
+## Copyright
 
 Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
 All rights reserved
