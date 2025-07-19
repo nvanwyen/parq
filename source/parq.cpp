@@ -19,15 +19,15 @@ void print_usage(const char* program_name)
 {
     std::cout << "Usage: " << program_name << " [options] <parquet_file> [file2] [file3] ...\n";
     std::cout << "Options:\n";
-    std::cout << "  -t, --tabular        Output in tabular format (default)\n";
-    std::cout << "  -j, --json           Output in JSON format\n";
-    std::cout << "  -c, --csv            Output in CSV format\n";
-    std::cout << "  -x, --xml            Output in XML format\n";
-    std::cout << "  -l, --limit <n>      Limit output to first n rows\n";
-    std::cout << "  -m, --metadata       Show only column metadata information\n";
-    std::cout << "  -C, --columns <list> Show only specified columns (comma-delimited)\n";
+    std::cout << "  -t, --tabular            Output in tabular format (default)\n";
+    std::cout << "  -j, --json               Output in JSON format\n";
+    std::cout << "  -c, --csv                Output in CSV format\n";
+    std::cout << "  -x, --xml                Output in XML format\n";
+    std::cout << "  -l, --limit <n>          Limit output to first n rows\n";
+    std::cout << "  -m, --metadata           Show only column metadata information\n";
+    std::cout << "  -C, --columns <list>     Show only specified columns (comma-delimited)\n";
     std::cout << "      --case <upper|lower> Set output case (default: lower)\n";
-    std::cout << "  -h, --help           Show this help message\n";
+    std::cout << "  -h, --help               Show this help message\n";
     std::cout << "\nNote: Output format options are mutually exclusive.\n";
     std::cout << "Multiple files can be processed in sequence.\n";
 }

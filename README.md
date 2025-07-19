@@ -3,17 +3,17 @@ A generic parquet file reader
 
 ```
 $ home/parq --help
-Usage: parq [options] <parquet_file> [file2] [file3] ...
+Usage: home/bin/parq [options] <parquet_file> [file2] [file3] ...
 Options:
-  -t, --tabular        Output in tabular format (default)
-  -j, --json           Output in JSON format
-  -c, --csv            Output in CSV format
-  -x, --xml            Output in XML format
-  -l, --limit <n>      Limit output to first n rows
-  -m, --metadata       Show only column metadata information
-  -C, --columns <list> Show only specified columns (comma-delimited)
+  -t, --tabular            Output in tabular format (default)
+  -j, --json               Output in JSON format
+  -c, --csv                Output in CSV format
+  -x, --xml                Output in XML format
+  -l, --limit <n>          Limit output to first n rows
+  -m, --metadata           Show only column metadata information
+  -C, --columns <list>     Show only specified columns (comma-delimited)
       --case <upper|lower> Set output case (default: lower)
-  -h, --help           Show this help message
+  -h, --help               Show this help message
 
 Note: Output format options are mutually exclusive.
 Multiple files can be processed in sequence.
