@@ -2,7 +2,7 @@
 // b64.hpp
 // ~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2004-2020 Metasystems Technologies Inc. (MTI)
+// Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
 // All rights reserved
 //
 // Distributed under the MTI Software License, Version 0.1.

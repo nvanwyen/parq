@@ -1,3 +1,16 @@
+# 
+# CMakeLists.txt
+# ~~~~~~~~~~~~~~~~~~~~~
+# 
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+# 
+# Distributed under the MTI Software License, Version 0.1.
+# 
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+# 
+
 # requires cmake version 2.16 or greater
 # https://cmake.org/cmake/help/latest/command/cmake_minimum_required.html
 cmake_minimum_required( VERSION 3.24 )

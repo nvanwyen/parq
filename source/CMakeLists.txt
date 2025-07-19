@@ -1,3 +1,16 @@
+# 
+# CMakeLists.txt
+# ~~~~~~~~~~~~~~~~~~~~~
+# 
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+# 
+# Distributed under the MTI Software License, Version 0.1.
+# 
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+# 
+
 #
 set(_app ${PROJECT_NAME}.${PROJECT_VERSION})
 string(TOLOWER "${_app}" _app)
@@ -48,6 +61,19 @@ string(TOLOWER "${PROJECT_WRAPPER}" PROJECT_WRAPPER)
 #
 file(WRITE "${PROJECT_WRAPPER}"
     "#!/bin/bash\n"
+    "\n"
+    "#\n"
+    "# parq (wrapper)\n"
+    "# ~~~~~~~~~~~~~~~~~~~~~\n"
+    "#\n"
+    "# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)\n"
+    "# All rights reserved\n"
+    "#\n"
+    "# Distributed under the MTI Software License, Version 0.1.\n"
+    "#\n"
+    "# as defined by accompanying file MTI-LICENSE-0.1.info or\n"
+    "# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info\n"
+    "#\n"
     "\n"
     "dir=\"\$(cd \"\$(dirname \"\$0\")\" ; pwd -P)\"\n"
     "LD_LIBRARY_PATH=\${dir}/lib:\${LD_LIBRARY_PATH}:.: && \${dir}/bin/parq \${@}")

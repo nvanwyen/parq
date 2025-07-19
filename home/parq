@@ -1,4 +1,17 @@
 #!/bin/bash
 
+#
+# parq (wrapper)
+# ~~~~~~~~~~~~~~~~~~~~~
+#
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+#
+# Distributed under the MTI Software License, Version 0.1.
+#
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+#
+
 dir="$(cd "$(dirname "$0")" ; pwd -P)"
 LD_LIBRARY_PATH=${dir}/lib:${LD_LIBRARY_PATH}:.: && ${dir}/bin/parq ${@}
