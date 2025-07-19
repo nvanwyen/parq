@@ -291,3 +291,64 @@ Warning: Column '__index_level_0__' not found in parquet file
 0.230000,56.900000,VS1,327,4.050000
 0.310000,63.300000,SI2,335,4.340000
 ```
+### Metadata
+The file information and metadata may be found by using the --metadata option.
+```
+$ home/parq --metadata test1.parquet test2.parquet
+File: test1.parquet
+Rows: 10, Columns: 11
+
+File Information:
+
+  Property        | Value                                                              |
+  ----------------+--------------------------------------------------------------------+
+  Row Groups      | 1                                                                  |
+  Created By      | parquet-cpp version 1.3.2-SNAPSHOT                                 |
+  File Size       | 2.16 KB                                                            |
+  File Checksum   | be6773848ce905b99192adc68f0c3b2aabab7d214db50b92a52203790566ab2b   |
+
+Column Information:
+
+  Index | Column Name            | Data Type         | Compression  |
+  ------+------------------------+-------------------+--------------+
+      0 | carat                  | DOUBLE            | snappy       |
+      1 | cut                    | STRING            | none         |
+      2 | color                  | STRING            | none         |
+      3 | clarity                | STRING            | none         |
+      4 | depth                  | DOUBLE            | none         |
+      5 | table                  | DOUBLE            | none         |
+      6 | price                  | INT64             | none         |
+      7 | x                      | DOUBLE            | none         |
+      8 | y                      | DOUBLE            | none         |
+      9 | z                      | DOUBLE            | none         |
+     10 | __index_level_0__      | INT64             | none         |
+
+================================================================================
+
+File: test2.parquet
+Rows: 10, Columns: 10
+
+File Information:
+
+  Property        | Value                                                              |
+  ----------------+--------------------------------------------------------------------+
+  Row Groups      | 1                                                                  |
+  Created By      | parquet-cpp version 1.3.2-SNAPSHOT                                 |
+  File Size       | 1.95 KB                                                            |
+  File Checksum   | 60f1945edc3e4ec38f6e234389e647a1b369de8afb9c7840c491a39880c0caa1   |
+
+Column Information:
+
+  Index | Column Name            | Data Type         | Compression  |
+  ------+------------------------+-------------------+--------------+
+      0 | carat                  | DOUBLE            | snappy       |
+      1 | depth                  | DOUBLE            | none         |
+      2 | table                  | DOUBLE            | none         |
+      3 | price                  | INT64             | none         |
+      4 | x                      | DOUBLE            | none         |
+      5 | y                      | DOUBLE            | none         |
+      6 | z                      | DOUBLE            | none         |
+      7 | cut                    | STRING            | none         |
+      8 | color                  | STRING            | none         |
+      9 | clarity                | STRING            | none         |
+```
