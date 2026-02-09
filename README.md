@@ -362,3 +362,6 @@ Distributed under the MTI Software License, Version 0.1.
 
 as defined by accompanying file MTI-LICENSE-0.1.info or
 at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+
+You are welcome to use this application and source free of charge. The Licensing is
+Open-Source, like the MIT Software License in it's scope.
