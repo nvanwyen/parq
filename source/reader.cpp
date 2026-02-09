@@ -77,7 +77,7 @@ void reader::open( const char* file )
                                       arrow::default_memory_pool() ) );
 
                 //
-                PARQUET_THROW_NOT_OK( read_->ReadTable( &table_ ) );
+                PARQUET_ASSIGN_OR_THROW( table_, read_->ReadTable() );
                 
                 // Store filename for later use
                 filename_ = file;
