@@ -77,7 +77,11 @@ void reader::open( const char* file )
                                       arrow::default_memory_pool() ) );
 
                 //
+#if ARROW_VERSION_MAJOR >= 24
                 PARQUET_ASSIGN_OR_THROW( table_, read_->ReadTable() );
+#else
+                PARQUET_THROW_NOT_OK( read_->ReadTable( &table_ ) );
+#endif
                 
                 // Store filename for later use
                 filename_ = file;
