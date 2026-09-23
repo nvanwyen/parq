@@ -1,0 +1,25 @@
+#!/bin/bash
+
+dir="$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")")"
+
+if [[ -d "${dir}/source" ]] ; then
+
+    if [[ -f "${dir}/source/VERSION" ]] ; then
+
+        echo "$(head -n 1 "${dir}/source/VERSION")"
+
+    else
+
+        >&2 echo "No version data could be found!"
+        exit 1
+
+    fi
+
+else
+
+    >&2 echo "Not a project directory!"
+    exit 1
+
+fi
+
+exit ${?}
