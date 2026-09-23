@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <sstream>
 #include "reader.hpp"
+#include "format.hpp"
 
 enum class OutputFormat
 {
@@ -30,8 +31,10 @@ enum class OutputFormat
 
 void print_usage(const char* program_name)
 {
-    std::cout << "Usage: " << program_name << " [options] <parquet_file> [file2] [file3] ...\n";
+    std::cout << "Usage: " << program_name << " [options] <file> [file2] [file3] ...\n";
     std::cout << "Options:\n";
+    std::cout << "  -p, --parquet            Input files are Parquet (default)\n";
+    std::cout << "  -a, --avro               Input files are Avro\n";
     std::cout << "  -t, --tabular            Output in tabular format (default)\n";
     std::cout << "  -j, --json               Output in JSON format\n";
     std::cout << "  -c, --csv                Output in CSV format\n";
@@ -42,6 +45,7 @@ void print_usage(const char* program_name)
     std::cout << "      --case <upper|lower> Set output case (default: lower)\n";
     std::cout << "  -h, --help               Show this help message\n";
     std::cout << "\nNote: Output format options are mutually exclusive.\n";
+    std::cout << "      Input format options are mutually exclusive.\n";
     std::cout << "Multiple files can be processed in sequence.\n";
 }
 
@@ -117,7 +121,7 @@ std::vector<size_t> get_column_indices(const mti::parq::reader& reader, const st
             }
         }
         if (!found)
-            std::cerr << "Warning: Column '" << name << "' not found in parquet file\n";
+            std::cerr << "Warning: Column '" << name << "' not found in file\n";
     }
     
     return indices;
@@ -139,10 +143,10 @@ bool is_numeric_column(const mti::parq::reader& reader, size_t column_index)
         case arrow::Type::type::INT32:
         case arrow::Type::type::UINT64:
         case arrow::Type::type::INT64:
-        case arrow::Type::type::HALF_FLOAT:
         case arrow::Type::type::FLOAT:
         case arrow::Type::type::DOUBLE:
         case arrow::Type::type::DECIMAL:
+        case arrow::Type::type::DECIMAL256:
             return true;
         default:
             return false;
@@ -160,6 +164,8 @@ int main(int argc, char* argv[])
     std::vector<std::string> filenames;
     OutputFormat output_format = OutputFormat::TABULAR;
     int format_count = 0;
+    mti::parq::input_format in_format = mti::parq::input_format::PARQUET;
+    int in_format_count = 0;
     bool metadata_only = false;
     std::vector<std::string> selected_columns;
     size_t limit = 0;
@@ -191,6 +197,16 @@ int main(int argc, char* argv[])
         {
             output_format = OutputFormat::XML;
             format_count++;
+        }
+        else if (arg == "--parquet" || arg == "-p")
+        {
+            in_format = mti::parq::input_format::PARQUET;
+            in_format_count++;
+        }
+        else if (arg == "--avro" || arg == "-a")
+        {
+            in_format = mti::parq::input_format::AVRO;
+            in_format_count++;
         }
         else if (arg == "--metadata" || arg == "-m")
             metadata_only = true;
@@ -231,6 +247,19 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    if (in_format_count > 1) {
+        std::cerr << "Error: Input format options are mutually exclusive.\n";
+        std::cerr << "Please specify only one of --parquet or --avro.\n";
+        return 1;
+    }
+
+    if (!mti::parq::supported(in_format)) {
+        std::cerr << "Error: This build has no " << mti::parq::to_string(in_format)
+                  << " support.\n";
+        std::cerr << "Rebuild with -DWITH_AVRO=ON (requires the avro-cpp library).\n";
+        return 1;
+    }
+
     // Process each file
     for (size_t file_idx = 0; file_idx < filenames.size(); file_idx++) {
         const std::string& filename = filenames[file_idx];
@@ -241,12 +270,14 @@ int main(int argc, char* argv[])
         }
         
         try {
-            mti::parq::reader parquet_reader;
+            mti::parq::reader_ptr reader_ref = mti::parq::make_reader(in_format);
+            mti::parq::reader& parquet_reader = *reader_ref;
             
             try {
                 parquet_reader.open(filename);
             } catch (...) {
-                std::cerr << "Error: Failed to open parquet file: " << filename << std::endl;
+                std::cerr << "Error: Failed to open " << mti::parq::to_string(in_format)
+                          << " file: " << filename << std::endl;
                 if (filenames.size() == 1) {
                     return 1;  // Exit with error for single file
                 } else {

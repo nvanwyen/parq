@@ -23,26 +23,71 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(Snappy REQUIRED)
 
-#
-include_directories(${PROJECT_DIRECTORY}/source)
+# Avro support is optional -- the reader is only compiled in when the avro-cpp
+# library is present and WITH_AVRO is on. Without it the binary still builds
+# and -a reports that this build has no avro support.
+option(WITH_AVRO "Build with Apache Avro input support" ON)
+
+set(AVRO_FOUND FALSE)
+
+if(WITH_AVRO)
+    find_package(avro-cpp CONFIG QUIET)
+
+    if(avro-cpp_FOUND)
+        set(AVRO_FOUND TRUE)
+
+        # avro-cpp uses fmt in its public headers but does not export it as an
+        # interface dependency, so link it here explicitly
+        find_package(fmt QUIET)
+        colormsg(HICYAN "Avro support enabled (avro-cpp ${avro-cpp_VERSION})")
+    else()
+        colormsg(HIRED "avro-cpp not found -- building without Avro support")
+        colormsg(HIRED "  install it (brew install avro-cpp / dnf install avro-cpp-devel)")
+        colormsg(HIRED "  or configure with -DWITH_AVRO=OFF to silence this")
+    endif()
+endif()
+
+# NOTE: deliberately no include_directories(${PROJECT_DIRECTORY}/source) here.
+# Project headers are included with quotes and sit beside the sources, so they
+# resolve without it -- and putting source/ on the include path makes the
+# standard <version> header resolve to source/VERSION on case-insensitive
+# filesystems (macOS), which breaks every translation unit that includes
+# <iostream>.
 
 #
 add_executable(${PROJECT_NAME}
     parq.cpp
     reader.cpp
+    reader_parquet.cpp
+    format.cpp
     b64.cpp
 )
 
 #
+if(AVRO_FOUND)
+    target_sources(${PROJECT_NAME} PRIVATE reader_avro.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE WITH_AVRO)
+endif()
+
+#
+# NOTE: Snappy and OpenSSL::SSL were linked here but never used -- arrow
+# handles snappy internally and only libcrypto (EVP) is called, for the file
+# checksum. Requiring them blocked builds for nothing.
 target_link_libraries(${PROJECT_NAME}
     Arrow::arrow_shared
     Parquet::parquet_shared
-    OpenSSL::SSL
     OpenSSL::Crypto
-    Snappy::snappy
 )
+
+#
+if(AVRO_FOUND)
+    target_link_libraries(${PROJECT_NAME} avro-cpp::avrocpp)
+
+    if(fmt_FOUND)
+        target_link_libraries(${PROJECT_NAME} fmt::fmt)
+    endif()
+endif()
 
 #
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)

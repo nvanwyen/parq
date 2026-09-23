@@ -25,12 +25,6 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 //
-// #include <arrow/csv/writer.h>
-#include <parquet/exception.h>
-#include <parquet/arrow/reader.h>
-#include <parquet/arrow/writer.h>
-#include <parquet/file_reader.h>
-#include <parquet/metadata.h>
 #include <arrow/util/formatting.h>
 
 //
@@ -47,7 +41,8 @@
 #define CORRUPTED_FILE      7
 #define INVALID_COLUMN      8
 #define CRITICAL_ERROR      9
-#define INVAILD_POINTER    10
+#define INVALID_POINTER    10
+#define NOT_SUPPORTED      11
 
 //
 namespace mti { namespace parq {
@@ -56,11 +51,17 @@ namespace mti { namespace parq {
 using arrow::internal::StringFormatter;
 
 //
+// Format agnostic reader.
+//
+// Everything below the load step works on an arrow::Table, so a derived reader
+// only has to turn its own file format into that table -- every accessor, type
+// mapping and value rendering is then shared. See reader_parquet.hpp and
+// reader_avro.hpp for the two implementations.
+//
 class reader
 {
     public:
         //
-        using FileReader = std::unique_ptr<parquet::arrow::FileReader>;
         using Table = std::shared_ptr<arrow::Table>;
         using Column = std::shared_ptr<arrow::ChunkedArray>;
         using Columns = std::vector<Column>;
@@ -89,18 +90,6 @@ class reader
                   what_( w ) {}
 
             //
-            exception( parquet::ParquetStatusException& ex )
-                : code_( 0 ),
-                  what_( "" ) { code_ = CORRUPTED_FILE;
-                                what_ = ex.what(); }
-
-            //
-            exception( parquet::ParquetException& ex )
-                : code_( 0 ),
-                  what_( "" ) { code_ = CRITICAL_ERROR;
-                                what_ = ex.what(); }
-
-            //
             const char* what() const noexcept override
             {
                 return what_.c_str();
@@ -121,15 +110,28 @@ class reader
 
         //
         reader();
-        reader( const char* file );
-        reader( std::string file );
+        virtual ~reader();
 
         //
-        void open( const char* file );
+        // format specific -- implemented by the derived readers
+        //
+        virtual void open( const char* file ) = 0;
         void open( std::string file );
 
+        // the name of the format this reader handles ( "parquet", "avro" )
+        virtual std::string format() const = 0;
+
+        // parquet row groups / avro blocks
+        virtual size_t num_row_groups() const = 0;
+
+        // the writer that produced the file, where the format records it
+        virtual std::string created_by() const = 0;
+
+        // per column for parquet, file level for avro
+        virtual std::string compression_type( Index col ) const = 0;
+
         //
-        void close();
+        virtual void close();
 
         //
         options_ptr properties();
@@ -159,21 +161,16 @@ class reader
         //
         std::string name( Index col ) const;
         std::string value( Index col, Index row ) const;
-        
+
         //
-        std::string compression_type( Index col ) const;
-        
-        //
-        size_t num_row_groups() const;
-        std::string created_by() const;
         int64_t file_size() const;
-        std::string file_checksum() const; 
+        std::string file_checksum() const;
 
         //
         std::string key( std::string id, Index row );
 
         //
-        std::string json( Index row ); 
+        std::string json( Index row );
 
         //
         static std::string to_type( Column col );
@@ -181,8 +178,7 @@ class reader
         static std::string to_type( Kind type );
 
     protected:
-    private:
-        FileReader read_;
+        //
         Table table_;
         std::string filename_;
 
@@ -191,6 +187,7 @@ class reader
         //
         void init() const;
 
+    private:
         //
         std::string use_case( std::string s ) const;
         std::string to_lower( std::string s ) const;

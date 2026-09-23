@@ -13,12 +13,14 @@
 
 //
 #include <cctype>
+#include <ctime>
 #include <locale>
 #include <random>
 #include <algorithm>
 #include <stdexcept>
 #include <sstream>
 #include <fstream>
+#include <sys/stat.h>
 #include <openssl/evp.h>
 #include <iomanip>
 //
@@ -36,72 +38,119 @@
 namespace mti { namespace parq {
 
 //
+namespace {
+
+// Floor division / modulus. Plain / and % truncate toward zero, which would
+// push pre-epoch (negative) values into the wrong day or second.
+int64_t floor_div( int64_t a, int64_t b )
+{
+    int64_t q = a / b;
+
+    if ( ( a % b != 0 ) && ( ( a < 0 ) != ( b < 0 ) ) )
+        --q;
+
+    return q;
+}
+
+//
+int64_t floor_mod( int64_t a, int64_t b )
+{
+    int64_t r = a % b;
+
+    if ( ( r != 0 ) && ( ( r < 0 ) != ( b < 0 ) ) )
+        r += b;
+
+    return r;
+}
+
+// Sub-second units per second for an Arrow time unit
+int64_t units_per_second( arrow::TimeUnit::type unit )
+{
+    switch ( unit )
+    {
+        case arrow::TimeUnit::SECOND: return 1LL;
+        case arrow::TimeUnit::MILLI:  return 1000LL;
+        case arrow::TimeUnit::MICRO:  return 1000000LL;
+        case arrow::TimeUnit::NANO:   return 1000000000LL;
+    }
+
+    return 1LL;
+}
+
+// Render the fractional part, trimmed of trailing zeros. Empty when whole.
+std::string fraction( int64_t sub, int64_t per_second )
+{
+    if ( ( sub == 0 ) || ( per_second <= 1 ) )
+        return std::string();
+
+    int digits = 0;
+
+    for ( int64_t v = per_second; v > 1; v /= 10 )
+        ++digits;
+
+    std::ostringstream os;
+    os << std::setfill( '0' ) << std::setw( digits ) << sub;
+
+    std::string str = os.str();
+
+    while ( ( ! str.empty() ) && ( str.back() == '0' ) )
+        str.pop_back();
+
+    return str.empty() ? std::string() : ( "." + str );
+}
+
+// Render an absolute instant, given as seconds since the Unix epoch, in UTC.
+// Date and timestamp columns carry no zone, so rendering them in local time
+// would shift the value the file actually holds.
+std::string format_instant( int64_t secs, const char* fmt )
+{
+    std::time_t tim = static_cast<std::time_t>( secs );
+    struct tm tmv = {};
+
+    if ( gmtime_r( &tim, &tmv ) == nullptr )
+        return std::string();
+
+    char buf[ 80 ] = { '\0' };
+
+    if ( std::strftime( buf, sizeof( buf ), fmt, &tmv ) == 0 )
+        return std::string();
+
+    return std::string( buf );
+}
+
+// Render a time of day held as a count of sub-second units since midnight
+std::string format_time_of_day( int64_t value, arrow::TimeUnit::type unit )
+{
+    int64_t per_second = units_per_second( unit );
+    int64_t secs = floor_div( value, per_second );
+    int64_t sub = floor_mod( value, per_second );
+
+    int64_t hh = floor_div( secs, 3600 ) % 24;
+    int64_t mm = floor_div( secs, 60 ) % 60;
+    int64_t ss = floor_mod( secs, 60 );
+
+    std::ostringstream os;
+
+    os << std::setfill( '0' )
+       << std::setw( 2 ) << hh << ":"
+       << std::setw( 2 ) << mm << ":"
+       << std::setw( 2 ) << ss
+       << fraction( sub, per_second );
+
+    return os.str();
+}
+
+} // anonymous namespace
+
+//
 reader::reader() : table_( nullptr )
 {
     init();
 }
 
 //
-reader::reader( const char* file )
+reader::~reader()
 {
-    init();
-    open( file );
-}
-
-//
-reader::reader( std::string file )
-{
-    init();
-    open( file );
-}
-
-//
-void reader::open( const char* file )
-{
-    //
-    if ( ! is_open() )
-    {
-        //
-        if ( file != nullptr )
-        {
-            std::shared_ptr<arrow::io::ReadableFile> in;
-
-            try
-            {
-                PARQUET_ASSIGN_OR_THROW( in,
-                    arrow::io::ReadableFile::Open( file,
-                                                   arrow::default_memory_pool() ) );
-
-                //
-                PARQUET_ASSIGN_OR_THROW( read_, parquet::arrow::OpenFile( in, 
-                                      arrow::default_memory_pool() ) );
-
-                //
-#if ARROW_VERSION_MAJOR >= 24
-                PARQUET_ASSIGN_OR_THROW( table_, read_->ReadTable() );
-#else
-                PARQUET_THROW_NOT_OK( read_->ReadTable( &table_ ) );
-#endif
-                
-                // Store filename for later use
-                filename_ = file;
-            }
-            catch ( parquet::ParquetException& ex )
-            {
-                throw reader::exception( CORRUPTED_FILE, ex.what() );
-            }
-            catch ( ... )
-            {
-                // ...
-                throw reader::exception( UNKNOWN_ERROR, "Unknown exception!" );
-            }
-
-        }
-        else
-            throw reader::exception( MISSING_FILE, "Invalid file name!" );
-    }
-    else
-        throw reader::exception( ALREADY_OPEN, "Already open" );
 }
 
 //
@@ -149,7 +198,13 @@ std::string reader::property( std::string name ) const
 //
 void reader::property( std::string name, std::string value )
 {
-    option_->insert( { name, value } );
+    //
+    init();
+
+    // NOTE: assign, do not insert. map::insert will not overwrite an existing
+    // key, and init() has already put the defaults in -- so every set_case(),
+    // set_scale() and set_precision() call was silently doing nothing.
+    ( *option_ )[ name ] = value;
 }
 
 //
@@ -397,12 +452,28 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 
                 case arrow::Type::type::DECIMAL:
                     {
-                        auto ary = std::static_pointer_cast<arrow::DecimalArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Decimal128Array>( dat->chunk( 0 ) );
+                        auto typ = std::static_pointer_cast<arrow::Decimal128Type>( dat->type() );
 
-                        if ( ary != nullptr )
+                        if ( ( ary != nullptr ) && ( typ != nullptr ) )
+                        {
+                            // the scale belongs to the column type; assuming 0
+                            // here would silently shift the decimal point
+                            if ( ! ary->IsNull( row ) )
+                                val = arrow::Decimal128( ary->Value( row ) ).ToString( typ->scale() );
+                        }
+                    }
+                    break;
+
+                case arrow::Type::type::DECIMAL256:
+                    {
+                        auto ary = std::static_pointer_cast<arrow::Decimal256Array>( dat->chunk( 0 ) );
+                        auto typ = std::static_pointer_cast<arrow::Decimal256Type>( dat->type() );
+
+                        if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
                             if ( ! ary->IsNull( row ) )
-                                val = arrow::Decimal128( ary->Value( row ) ).ToString( 0 );
+                                val = arrow::Decimal256( ary->Value( row ) ).ToString( typ->scale() );
                         }
                     }
                     break;
@@ -447,20 +518,12 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                     {
                         auto ary = std::static_pointer_cast<arrow::Date32Array>( dat->chunk( 0 ) );
 
-                        // int
+                        // days since the epoch
                         if ( ary != nullptr )
                         {
                             if ( ! ary->IsNull( row ) )
-                            {
-                                char buf[ 80 ] = { '\0' };
-                                struct tm* tm = nullptr;
-                                time_t tim = ( ary->Value( row ) / 1000 );
-
-                                tm = std::localtime( &tim );
-                                std::strftime( buf, 80,"%Y-%m-%d", tm );
-
-                                val = std::string( buf );
-                            }
+                                val = format_instant( static_cast<int64_t>( ary->Value( row ) ) * 86400LL,
+                                                      "%Y-%m-%d" );
                         }
                     }
                     break;
@@ -469,20 +532,12 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                     {
                         auto ary = std::static_pointer_cast<arrow::Date64Array>( dat->chunk( 0 ) );
 
-                        // long long
+                        // milliseconds since the epoch
                         if ( ary != nullptr )
                         {
                             if ( ! ary->IsNull( row ) )
-                            {
-                                char buf[ 80 ] = { '\0' };
-                                struct tm* tm = nullptr;
-                                time_t tim = ( ( ary->Value( row ) / 1000 ) / 1000 );
-
-                                tm = std::localtime( &tim );
-                                std::strftime( buf, 80,"%Y-%m-%d", tm );
-
-                                val = std::string( buf );
-                            }
+                                val = format_instant( floor_div( ary->Value( row ), 1000LL ),
+                                                      "%Y-%m-%d" );
                         }
                     }
                     break;
@@ -490,20 +545,18 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                 case arrow::Type::type::TIMESTAMP:
                     {
                         auto ary = std::static_pointer_cast<arrow::TimestampArray>( dat->chunk( 0 ) );
+                        auto typ = std::static_pointer_cast<arrow::TimestampType>( dat->type() );
 
-                        // long long
-                        if ( ary != nullptr )
+                        // the unit is part of the column type, not fixed
+                        if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
                             if ( ! ary->IsNull( row ) )
                             {
-                                char buf[ 80 ] = { '\0' };
-                                struct tm* tm = nullptr;
-                                time_t tim = ( ( ary->Value( row ) / 1000 ) / 1000 );
+                                int64_t per = units_per_second( typ->unit() );
+                                int64_t raw = ary->Value( row );
 
-                                tm = std::localtime( &tim );
-                                std::strftime( buf, 80,"%Y-%m-%d %H:%M:%S", tm );
-
-                                val = std::string( buf );
+                                val = format_instant( floor_div( raw, per ), "%Y-%m-%d %H:%M:%S" )
+                                    + fraction( floor_mod( raw, per ), per );
                             }
                         }
                     }
@@ -512,21 +565,13 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                 case arrow::Type::type::TIME32:
                     {
                         auto ary = std::static_pointer_cast<arrow::Time32Array>( dat->chunk( 0 ) );
+                        auto typ = std::static_pointer_cast<arrow::Time32Type>( dat->type() );
 
-                        // int
-                        if ( ary != nullptr )
+                        // a time of day, not an instant
+                        if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
                             if ( ! ary->IsNull( row ) )
-                            {
-                                char buf[ 80 ] = { '\0' };
-                                struct tm* tm = nullptr;
-                                time_t tim = ( ary->Value( row ) / 1000 );
-
-                                tm = std::localtime( &tim );
-                                std::strftime( buf, 80,"%Y-%m-%d %H:%M:%S", tm );
-
-                                val = std::string( buf );
-                            }
+                                val = format_time_of_day( ary->Value( row ), typ->unit() );
                         }
                     }
                     break;
@@ -534,21 +579,13 @@ std::string reader::value( reader::Index col, reader::Index row ) const
                 case arrow::Type::type::TIME64:
                     {
                         auto ary = std::static_pointer_cast<arrow::Time64Array>( dat->chunk( 0 ) );
+                        auto typ = std::static_pointer_cast<arrow::Time64Type>( dat->type() );
 
-                        // long long
-                        if ( ary != nullptr )
+                        // a time of day, not an instant
+                        if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
                             if ( ! ary->IsNull( row ) )
-                            {
-                                char buf[ 80 ] = { '\0' };
-                                struct tm* tm = nullptr;
-                                time_t tim = ( ( ary->Value( row ) / 1000 ) / 1000 );
-
-                                tm = std::localtime( &tim );
-                                std::strftime( buf, 80,"%Y-%m-%d %H:%M:%S", tm );
-
-                                val = std::string( buf );
-                            }
+                                val = format_time_of_day( ary->Value( row ), typ->unit() );
                         }
                     }
                     break;
@@ -578,127 +615,21 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 }
 
 //
-std::string reader::compression_type( reader::Index col ) const
-{
-    std::string compression = "none";
-    
-    try {
-        if (read_ != nullptr) {
-            // Get the parquet file reader
-            auto parquet_reader = read_->parquet_reader();
-            if (parquet_reader != nullptr) {
-                // Get file metadata
-                auto file_metadata = parquet_reader->metadata();
-                if (file_metadata != nullptr && col < static_cast<Index>(file_metadata->num_row_groups())) {
-                    // Get the first row group to check compression
-                    auto row_group = file_metadata->RowGroup(0);
-                    if (row_group != nullptr && col < static_cast<Index>(row_group->num_columns())) {
-                        auto column_chunk = row_group->ColumnChunk(col);
-                        if (column_chunk != nullptr) {
-                            // Get compression codec
-                            switch (column_chunk->compression()) {
-                                case parquet::Compression::UNCOMPRESSED:
-                                    compression = "none";
-                                    break;
-                                case parquet::Compression::SNAPPY:
-                                    compression = "snappy";
-                                    break;
-                                case parquet::Compression::GZIP:
-                                    compression = "gzip";
-                                    break;
-                                case parquet::Compression::LZO:
-                                    compression = "lzo";
-                                    break;
-                                case parquet::Compression::BROTLI:
-                                    compression = "brotli";
-                                    break;
-                                case parquet::Compression::LZ4:
-                                    compression = "lz4";
-                                    break;
-                                case parquet::Compression::ZSTD:
-                                    compression = "zstd";
-                                    break;
-                                default:
-                                    compression = "unknown";
-                                    break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } catch (...) {
-        // If we can't determine compression, return "unknown"
-        compression = "unknown";
-    }
-    
-    return compression;
-}
-
-//
-size_t reader::num_row_groups() const
-{
-    size_t count = 0;
-    
-    try {
-        if (read_ != nullptr) {
-            auto parquet_reader = read_->parquet_reader();
-            if (parquet_reader != nullptr) {
-                auto file_metadata = parquet_reader->metadata();
-                if (file_metadata != nullptr) {
-                    count = file_metadata->num_row_groups();
-                }
-            }
-        }
-    } catch (...) {
-        // Return 0 if we can't determine
-    }
-    
-    return count;
-}
-
-//
-std::string reader::created_by() const
-{
-    std::string created_by = "unknown";
-    
-    try {
-        if (read_ != nullptr) {
-            auto parquet_reader = read_->parquet_reader();
-            if (parquet_reader != nullptr) {
-                auto file_metadata = parquet_reader->metadata();
-                if (file_metadata != nullptr) {
-                    created_by = file_metadata->created_by();
-                }
-            }
-        }
-    } catch (...) {
-        // Return "unknown" if we can't determine
-    }
-    
-    return created_by;
-}
-
-//
 int64_t reader::file_size() const
 {
-    int64_t size = -1;
-    
-    try {
-        if (read_ != nullptr) {
-            auto parquet_reader = read_->parquet_reader();
-            if (parquet_reader != nullptr) {
-                auto file_metadata = parquet_reader->metadata();
-                if (file_metadata != nullptr) {
-                    size = file_metadata->size();
-                }
-            }
-        }
-    } catch (...) {
-        // Return -1 if we can't determine
-    }
-    
-    return size;
+    // NOTE: this used to report parquet's FileMetaData::size(), which is the
+    // size of the thrift metadata block, not of the file -- an 1878 byte file
+    // reported 989 bytes. Ask the filesystem instead, which is also the only
+    // thing that works for a format with no such metadata at all.
+    if ( filename_.empty() )
+        return -1;
+
+    struct stat st;
+
+    if ( ::stat( filename_.c_str(), &st ) != 0 )
+        return -1;
+
+    return static_cast<int64_t>( st.st_size );
 }
 
 //
@@ -900,6 +831,10 @@ std::string reader::to_type( reader::Kind type )
 
         case arrow::Type::type::DECIMAL:
             str = "DECIMAL";
+            break;
+
+        case arrow::Type::type::DECIMAL256:
+            str = "DECIMAL256";
             break;
 
         case arrow::Type::type::INTERVAL_MONTHS:
