@@ -63,7 +63,9 @@ size_t b64::encode( const char* in, size_t len, char** out )
         //
         ::memcpy( *out, ptr->data, ptr->length );
 
-        (*out)[ ptr->length + 1 ] = 0;
+        // NOTE: the buffer is ( ptr->length + 1 ) bytes and was already zeroed
+        // by the memset above, so the terminator is in place. Writing to
+        // [ ptr->length + 1 ] here would be one byte past the end.
     }
 
     //
@@ -173,8 +175,6 @@ size_t b64::decode( std::istream& si, std::ostream& so )
         {
             for ( int i = 0; i < rsz; ++i )
                 vec.push_back( in[ i ] );
-
-            free( out );
         }
     }
 
@@ -191,6 +191,9 @@ size_t b64::decode( std::istream& si, std::ostream& so )
                 so.write( ch, 1 );
             }
         }
+
+        // decode() allocates unconditionally, so release it either way
+        free( out );
     }
 
     return len;
