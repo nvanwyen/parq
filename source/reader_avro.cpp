@@ -124,16 +124,24 @@ std::shared_ptr<arrow::DataType> arrow_type( const avro::NodePtr& node )
                     return arrow::time64( arrow::TimeUnit::MICRO );
 
                 case avro::LogicalType::TIMESTAMP_MILLIS:
+#ifdef AVRO_HAS_EXTENDED_TIMESTAMPS
                 case avro::LogicalType::LOCAL_TIMESTAMP_MILLIS:
+#endif
                     return arrow::timestamp( arrow::TimeUnit::MILLI );
 
                 case avro::LogicalType::TIMESTAMP_MICROS:
+#ifdef AVRO_HAS_EXTENDED_TIMESTAMPS
                 case avro::LogicalType::LOCAL_TIMESTAMP_MICROS:
+#endif
                     return arrow::timestamp( arrow::TimeUnit::MICRO );
 
+#ifdef AVRO_HAS_EXTENDED_TIMESTAMPS
+                // these logical types only exist from avro-cpp 1.12.2; on older
+                // releases such columns fall through to INT64
                 case avro::LogicalType::TIMESTAMP_NANOS:
                 case avro::LogicalType::LOCAL_TIMESTAMP_NANOS:
                     return arrow::timestamp( arrow::TimeUnit::NANO );
+#endif
 
                 default:
                     return arrow::int64();

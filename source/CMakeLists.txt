@@ -40,6 +40,31 @@ if(WITH_AVRO)
         # avro-cpp uses fmt in its public headers but does not export it as an
         # interface dependency, so link it here explicitly
         find_package(fmt QUIET)
+
+        # The local-timestamp and nanosecond logical types only exist from
+        # avro-cpp 1.12.2. There is no version macro a consumer can test, so
+        # probe for them -- older avro-cpp (EL repos, 1.12.0) must still build.
+        include(CheckCXXSourceCompiles)
+
+        get_target_property(_avro_inc avro-cpp::avrocpp INTERFACE_INCLUDE_DIRECTORIES)
+        set(CMAKE_REQUIRED_INCLUDES ${_avro_inc})
+        set(CMAKE_REQUIRED_QUIET ON)
+
+        check_cxx_source_compiles("
+            #include <avro/LogicalType.hh>
+            int main() {
+                return (int) avro::LogicalType::LOCAL_TIMESTAMP_MICROS
+                     + (int) avro::LogicalType::TIMESTAMP_NANOS;
+            }" AVRO_HAS_EXTENDED_TIMESTAMPS)
+
+        unset(CMAKE_REQUIRED_INCLUDES)
+        unset(CMAKE_REQUIRED_QUIET)
+
+        if(AVRO_HAS_EXTENDED_TIMESTAMPS)
+            colormsg(HICYAN "  avro local/nanosecond timestamp logical types available")
+        else()
+            colormsg(HIRED "  avro-cpp predates local/nanosecond timestamps; those map to INT64")
+        endif()
         colormsg(HICYAN "Avro support enabled (avro-cpp ${avro-cpp_VERSION})")
     else()
         colormsg(HIRED "avro-cpp not found -- building without Avro support")
@@ -68,6 +93,10 @@ add_executable(${PROJECT_NAME}
 if(AVRO_FOUND)
     target_sources(${PROJECT_NAME} PRIVATE reader_avro.cpp)
     target_compile_definitions(${PROJECT_NAME} PRIVATE WITH_AVRO)
+
+    if(AVRO_HAS_EXTENDED_TIMESTAMPS)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE AVRO_HAS_EXTENDED_TIMESTAMPS)
+    endif()
 endif()
 
 #

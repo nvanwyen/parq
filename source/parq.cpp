@@ -275,6 +275,17 @@ int main(int argc, char* argv[])
             
             try {
                 parquet_reader.open(filename);
+            } catch (std::exception& e) {
+                // NOTE: report what the reader said. Swallowing it hides things
+                // the user can act on, such as "Unknown codec in data file:
+                // snappy", behind a generic open failure.
+                std::cerr << "Error: Failed to open " << mti::parq::to_string(in_format)
+                          << " file: " << filename << ": " << e.what() << std::endl;
+                if (filenames.size() == 1) {
+                    return 1;  // Exit with error for single file
+                } else {
+                    continue;  // Continue with next file for multiple files
+                }
             } catch (...) {
                 std::cerr << "Error: Failed to open " << mti::parq::to_string(in_format)
                           << " file: " << filename << std::endl;
