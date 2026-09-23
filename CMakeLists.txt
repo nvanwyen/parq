@@ -34,8 +34,33 @@ set( PROJECT_HOME ${PROJECT_DIRECTORY}/home )
 set( CMAKE_MODULE_PATH ${PROJECT_DIRECTORY}/cmake )
 
 # version
+# NOTE: the VERSION script in the project root is the single source of truth --
+# it echoes the value it keeps in source/VERSION. Always ask the script, never
+# read source/VERSION directly, so there is exactly one place that decides what
+# the version is. This also overrides the VERSION given to project() above.
 set( PROJECT_VERSION "" )
-file( STRINGS "${PROJECT_DIRECTORY}/VERSION" PROJECT_VERSION )
+
+execute_process( COMMAND "${PROJECT_DIRECTORY}/VERSION"
+                 WORKING_DIRECTORY "${PROJECT_DIRECTORY}"
+                 OUTPUT_VARIABLE PROJECT_VERSION
+                 OUTPUT_STRIP_TRAILING_WHITESPACE
+                 RESULT_VARIABLE VERSION_RESULT
+                 ERROR_VARIABLE VERSION_ERROR )
+
+if ( ( NOT VERSION_RESULT EQUAL 0 ) OR ( PROJECT_VERSION STREQUAL "" ) )
+    message( FATAL_ERROR
+        "Could not determine the version by running ${PROJECT_DIRECTORY}/VERSION\n"
+        "  result: ${VERSION_RESULT}\n"
+        "  error : ${VERSION_ERROR}\n"
+        "Check that the file exists and is executable." )
+endif()
+
+# re-run cmake when the version changes, so the binary is never built with a
+# stale name. These are change triggers only -- the value still comes from the
+# script above.
+set_property( DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+              "${PROJECT_DIRECTORY}/VERSION"
+              "${PROJECT_DIRECTORY}/source/VERSION" )
 
 #
 include( Utilities )
