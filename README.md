@@ -1,10 +1,12 @@
 # parq
-A generic parquet file reader
+A generic parquet and avro file reader
 
 ```
 $ home/parq --help
-Usage: home/bin/parq [options] <parquet_file> [file2] [file3] ...
+Usage: /projects/parq/home/bin/parq [options] <file> [file2] [file3] ...
 Options:
+  -p, --parquet            Input files are Parquet (default)
+  -a, --avro               Input files are Avro
   -t, --tabular            Output in tabular format (default)
   -j, --json               Output in JSON format
   -c, --csv                Output in CSV format
@@ -16,6 +18,7 @@ Options:
   -h, --help               Show this help message
 
 Note: Output format options are mutually exclusive.
+      Input format options are mutually exclusive.
 Multiple files can be processed in sequence.
 ```
 
