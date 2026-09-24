@@ -13,8 +13,27 @@
 # at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
 # 
 
+prj=parq
 dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
 cd ${dir}/
+
+#
+# Build type. Defaults to release, so a bare ./configure keeps behaving the way
+# it always has. ./construct drives both in turn.
+bld=$( echo "${1}" | tr '[:upper:]' '[:lower:]' )
+
+case "${bld}" in
+
+    ""|release) bld="release" ; cmake_bld="Release" ;;
+    debug)      bld="debug"   ; cmake_bld="Debug"   ;;
+    clean)      ;;  # handled below
+    *)
+        echo "Invalid build type [${1}], must be 'debug' or 'release'"
+        echo "Usage: ./configure [clean|debug|release]"
+        exit 1
+        ;;
+
+esac
 
 echo "Building parq reader..."
 
@@ -26,7 +45,35 @@ if ! pkg-config --exists snappy 2>/dev/null && ! [ -f /usr/local/include/snappy.
     echo "  RHEL/CentOS: sudo yum install snappy-devel"
 fi
 
+#
+# NOTE: the build installs into home/bin via a POST_BUILD step that only ever
+# copies -- it never removes what was there before, so the binary from every
+# previous version stays in home/bin until something removes it.
+#
+# That something is "./configure clean", deliberately: a plain rebuild leaves
+# home/ alone, because home/lib holds the libraries ./dist collected and a
+# rebuild has no business discarding them. ./dist does its own cleanup before
+# packaging, so a release still cannot pick up a stale binary.
+function clean_home()
+{
+    if [ -d "${dir}/home/bin" ]; then
+
+        rm -f "${dir}"/home/bin/${prj}.v* 2>/dev/null
+        rm -f "${dir}/home/bin/${prj}" 2>/dev/null
+
+    fi
+
+    if [ -d "${dir}/home/lib" ]; then
+
+        rm -f "${dir}"/home/lib/* 2>/dev/null
+
+    fi
+}
+
 if [[ ${1} == "clean" ]] ; then
+
+    # a clean removes everything generated, not just the build tree
+    clean_home
 
     if [ -d "build" ]; then
 
@@ -37,7 +84,7 @@ if [[ ${1} == "clean" ]] ; then
 
     else
 
-        echo "Already clean"
+        echo "Cleaned (no build tree)"
         exit 0
 
     fi
@@ -51,7 +98,10 @@ else
 fi
 
 #
-cd build && cmake .. && make
+echo "Build type: ${cmake_bld}"
+
+#
+cd build && cmake .. -DCMAKE_BUILD_TYPE=${cmake_bld} && make
 
 #
 if [ $? -eq 0 ]; then

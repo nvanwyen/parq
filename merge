@@ -1,0 +1,263 @@
+#!/bin/bash
+
+# 
+# merge
+# ~~~~~~~~~~~~~~~~~~~~~
+# 
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+# 
+# Distributed under the MTI Software License, Version 0.1.
+# 
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+# 
+
+#
+# Folds the per-platform release notes that ./dist writes into archive/
+# (parq.<ver>.<plt>.md) into a single note, ready to paste into a git tag or
+# release page.
+#
+# Each platform is built on its own host, so this is run after collecting the
+# archive/*.md files from each of them into one archive/ directory.
+#
+
+prj=parq
+dir="$(cd "$(dirname "$0")" ; pwd -P)"
+
+#
+function usage()
+{
+    echo "Usage: $0 [version] [platform ...]"
+    echo "    Merges the per-platform .md release notes into one release note"
+    echo "    suitable for copy/paste into git (tag, release, etc.)"
+    echo
+    echo "    If version is omitted it comes from the VERSION script"
+    echo "    Zero or more platforms may be given to filter the output"
+    echo "    Supported platforms: el7, el8, el9, mac"
+    echo
+    echo "  Example:"
+    echo "    $0 v2.1"
+    echo "    $0 v2.1 el8        # only EL8"
+    echo "    $0 v2.1 mac el7    # macOS and EL7"
+    echo "    $0 \"\" mac          # current version, macOS only"
+    echo "    $0                 # all platforms, version from VERSION"
+    echo "    $0 | pbcopy        # copy to the clipboard"
+    echo
+    exit 1
+}
+
+#
+function color_echo()
+{
+    local color=$1;
+    local exp=$2;
+
+    if ! [[ $color =~ '^[0-9]$' ]] ; then
+
+        case $(echo $color | tr '[:upper:]' '[:lower:]') in
+              black) color=0 ;;
+                red) color=1 ;;
+              green) color=2 ;;
+             yellow) color=3 ;;
+               blue) color=4 ;;
+            magenta) color=5 ;;
+               cyan) color=6 ;;
+            white|*) color=7 ;;
+        esac
+
+    fi
+
+    tput setaf $color;
+    echo "$exp";
+    tput sgr0;
+}
+
+#
+if [[ "${1}" == "-h" ]] || [[ "${1}" == "--help" ]] || [[ "${1}" == "-?" ]] ; then
+
+    usage
+
+fi
+
+#
+# version -- ask the VERSION script, never read source/VERSION directly
+#
+if [[ -z ${1} ]] ; then
+
+    if [[ -x ${dir}/VERSION ]] ; then
+
+        ver=$( "${dir}/VERSION" )
+
+    else
+
+        color_echo red "Cannot determine version: no executable VERSION script"
+        exit 1
+
+    fi
+
+else
+
+    ver="${1}"
+
+fi
+
+if [[ -z ${ver} ]] ; then
+
+    color_echo red "Version not provided and could not be determined"
+    exit 1
+
+fi
+
+#
+# optional platform filters (everything after the version)
+#
+shift 2>/dev/null
+plt_filters=()
+
+for arg in "$@" ; do
+
+    p=$( echo "${arg}" | tr '[:upper:]' '[:lower:]' )
+
+    case "${p}" in
+
+        el7|el8|el9|mac) plt_filters+=("${p}") ;;
+        *)
+            color_echo red "Unsupported platform '${arg}'; must be el7, el8, el9 or mac"
+            exit 1
+            ;;
+
+    esac
+
+done
+
+#
+cd ${dir}
+
+if [[ ${#plt_filters[@]} -gt 0 ]] ; then
+
+    md_files=()
+
+    for p in "${plt_filters[@]}" ; do
+
+        for f in $( ls -t archive/${prj}.${ver}.${p}.md 2>/dev/null ) ; do
+
+            md_files+=("${f}")
+
+        done
+
+    done
+
+else
+
+    md_files=($( ls -t archive/${prj}.${ver}.*.md 2>/dev/null ))
+
+fi
+
+if [[ ${#md_files[@]} -eq 0 ]] ; then
+
+    color_echo red "No .md files found for version ${ver} in archive/"
+    color_echo red "Run ./construct on each platform first, then collect the archive/*.md files here"
+    exit 1
+
+fi
+
+#
+# platform of each note, taken from its filename
+#
+platforms=()
+
+for md in "${md_files[@]}" ; do
+
+    fname=$( basename "${md}" )
+    mid=${fname#${prj}.}
+    mid=${mid%.md}
+    plt=${mid##*.}
+
+    platforms+=("${plt}")
+
+done
+
+#
+commit=$( git -C "${dir}" rev-parse --short HEAD 2>/dev/null )
+[[ -z ${commit} ]] && commit="unknown"
+
+#
+# --- merged release note ---
+#
+echo
+echo "# Parquet Reader (parq), Version ${ver}"
+echo "A generic reader for Apache Parquet and Apache Avro files, with tabular, JSON, CSV and XML output."
+echo
+
+echo "## Statistics"
+echo '```'
+echo " Last commit: ${commit}"
+echo "  Platforms: ${platforms[@]}"
+echo '```'
+echo
+
+echo "## Change log"
+git -C "${dir}" log --reverse 2>/dev/null | grep "${ver}," | sed s/${ver},/-/g | uniq
+echo
+
+echo "## Distribution"
+echo "Each download contains everything needed to get started, upgrade or patch."
+echo '```'
+
+for i in "${!platforms[@]}" ; do
+
+    plt=${platforms[$i]}
+    md=${md_files[$i]}
+
+    grep "${prj}.${ver}.${plt}.tgz" "${md}" | head -1
+
+done
+
+echo '```'
+echo
+
+echo "### Contents"
+echo "Each distribution bundle contains the following archives:"
+echo
+
+echo "#### Source code"
+echo "Build from source with CMake; see the README for build instructions."
+echo '```'
+grep "${prj}.${ver}.source.tgz" "${md_files[0]}" | head -1
+echo '```'
+echo
+
+echo "#### Debug build"
+echo "Debug build with symbols, for diagnostics and troubleshooting."
+echo '```'
+
+for i in "${!platforms[@]}" ; do
+
+    plt=${platforms[$i]}
+    md=${md_files[$i]}
+
+    grep "${prj}.${ver}.${plt}.debug.tgz" "${md}" | head -1
+
+done
+
+echo '```'
+echo
+
+echo "#### Release build"
+echo "Optimized release build for production use."
+echo '```'
+
+for i in "${!platforms[@]}" ; do
+
+    plt=${platforms[$i]}
+    md=${md_files[$i]}
+
+    grep "${prj}.${ver}.${plt}.release.tgz" "${md}" | head -1
+
+done
+
+echo '```'
+echo
+
+echo "_Stamp: $(date)_"

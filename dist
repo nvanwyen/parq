@@ -1,0 +1,424 @@
+#!/bin/bash
+
+# 
+# dist
+# ~~~~~~~~~~~~~~~~~~~~~
+# 
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+# 
+# Distributed under the MTI Software License, Version 0.1.
+# 
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+# 
+
+prj=parq
+
+# NOTE: the argument is the BUILD TYPE, not the version -- the version always
+# comes from the VERSION script, so there is one place that decides it.
+bld=$1
+dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+
+cd $dir
+
+#
+function color_echo()
+{
+    local color=$1;
+    local exp=$2;
+    local opt=$3;
+
+    if ! [[ $color =~ '^[0-9]$' ]] ; then
+
+        case $(echo $color | tr '[:upper:]' '[:lower:]') in
+              black) color=0 ;;
+                red) color=1 ;;
+              green) color=2 ;;
+             yellow) color=3 ;;
+               blue) color=4 ;;
+            magenta) color=5 ;;
+               cyan) color=6 ;;
+            white|*) color=7 ;; # white or "other"
+        esac
+
+    fi
+
+    tput setaf $color;
+    echo ${opt} "$exp";
+    tput sgr0;
+}
+
+#
+# sha1sum is coreutils (Linux); macOS ships shasum instead. Output format of
+# both is "<hash>  <filename>", so callers do not care which one runs.
+function sha1()
+{
+    if command -v sha1sum >/dev/null 2>&1 ; then
+
+        sha1sum "${@}"
+
+    else
+
+        shasum -a 1 "${@}"
+
+    fi
+}
+
+#
+function platform()
+{
+    local val=""
+
+    if [[ -f /proc/version ]] ; then
+    
+        val=$( cat /proc/version | awk '{ if ( $3 ~ /el[5-8]/ )
+                                              { print tolower( substr( $3, index( $3, "el" ), 3 ) ) }
+                                          else
+                                              { print tolower( gensub( /\.|-|[0-9]+/, "", "g", $3 ) ) } }' )
+    
+        if [[ "${val}" == "linuxkit" ]] ; then
+    
+            if [[ -f /etc/os-release ]] ; then
+    
+                val="el$(grep -w VERSION /etc/os-release | awk -F '=' '{print $2}' | sed 's/"//g' | awk -F '.' '{print $1}')"
+    
+            else
+    
+                val="err"
+
+            fi
+
+        fi
+
+        # only fall back when nothing could be derived -- the awk result above
+        # is the answer on a real EL box and must not be discarded
+        if [[ -z ${val} ]] ; then
+
+            val="unk"
+
+        fi
+
+    else
+
+        val="mac"
+
+    fi
+
+    echo ${val}
+}
+
+#
+# Remove the output of previous builds from home/ before packaging.
+#
+# dist tars the whole of home/, so anything left behind from an earlier
+# version ships inside the release -- a v2.1 archive was going out with
+# bin/parq.v1.1 still in it.
+function clean_build()
+{
+    local bin_dir="${dir}/home/bin"
+    local lib_dir="${dir}/home/lib"
+
+    #
+    if [[ ! -f "${bin_dir}/${prj}.${ver}" ]] ; then
+
+        color_echo red "No build found at home/bin/${prj}.${ver}"
+        color_echo red "Run ./configure before ./dist, or the release would ship stale or missing binaries"
+        exit 1
+
+    fi
+
+    # binaries and symlinks from other versions
+    find "${bin_dir}" -maxdepth 1 -type f ! -name "${prj}.${ver}" -exec rm -f {} \; 2>/dev/null
+    find "${bin_dir}" -maxdepth 1 -type l ! -name "${prj}" -exec rm -f {} \; 2>/dev/null
+
+    # libraries are re-collected below, so start from empty -- otherwise libs
+    # from an older toolchain linger and ship beside the current ones
+    if [[ -d "${lib_dir}" ]] ; then
+
+        rm -f "${lib_dir}"/* 2>/dev/null
+
+    fi
+
+    mkdir -p "${lib_dir}"
+}
+
+#
+# Copy the shared libraries this build needs into home/lib, so the release is
+# self contained and the home/parq wrapper can find them.
+#
+# ldd reports the whole transitive closure. Anything resolved out of the
+# standard system paths is assumed present on the target host and is skipped;
+# everything else (arrow, parquet, avro, fmt, thrift, snappy ...) is ours to
+# ship. Copies dereference the link so the file lands under the SONAME the
+# loader actually asks for.
+function collect_libs()
+{
+    local bin_dir="${dir}/home/bin"
+    local lib_dir="${dir}/home/lib"
+    local count=0
+
+    #
+    if [[ "$(uname)" != "Linux" ]] ; then
+
+        color_echo yellow "skipped: library collection is Linux only (this host is $(uname))"
+        color_echo yellow "         macOS records absolute install names, so copied dylibs would"
+        color_echo yellow "         not resolve without install_name_tool rewriting"
+        return 0
+
+    fi
+
+    #
+    for fil in $( find "${bin_dir}/" -type f 2>/dev/null ) ; do
+
+        for lib in $( ldd "${fil}" 2>/dev/null \
+                    | grep "=>" \
+                    | awk '{print $3}' \
+                    | grep -v '^(' \
+                    | awk '/^\/(lib|lib64|usr\/lib|usr\/lib64)\// {next} {print}' ) ; do
+
+            [[ -e "${lib}" ]] || continue
+
+            local fn=$( basename "${lib}" )
+
+            [[ -e "${lib_dir}/${fn}" ]] && continue
+
+            cp -L "${lib}" "${lib_dir}/${fn}" 2>/dev/null || continue
+
+            # some consumers link against the bare .so name, so provide it
+            local base=$( echo "${fn}" | sed 's/\.so[.0-9]*$/.so/' )
+
+            if [[ "${base}" != "${fn}" ]] && [[ ! -e "${lib_dir}/${base}" ]] ; then
+
+                ( cd "${lib_dir}" && ln -sf "${fn}" "${base}" )
+
+            fi
+
+            count=$(( count + 1 ))
+
+        done
+
+    done
+
+    #
+    if [[ ${count} -eq 0 ]] ; then
+
+        color_echo yellow "no external libraries collected"
+
+    else
+
+        echo -n "${count} libraries "
+
+    fi
+}
+
+#
+# build type
+bld=$( echo "${bld}" | tr '[:upper:]' '[:lower:]' )
+
+case "${bld}" in
+
+    ""|release) bld="release" ;;
+    debug)      bld="debug"   ;;
+    *)
+        color_echo red "Invalid build type [${1}], must be 'debug' or 'release'"
+        echo "Usage: ./dist [debug|release]"
+        exit 1
+        ;;
+
+esac
+
+#
+# version -- always ask the VERSION script, never read source/VERSION directly
+if [[ -x ${dir}/VERSION ]] ; then
+
+    ver=$( "${dir}/VERSION" )
+
+fi
+
+if [[ -z ${ver} ]] ; then
+
+    color_echo red "Version could not be determined by running ${dir}/VERSION"
+    exit 1
+
+fi
+
+# platform
+if [[ -z ${plt} ]] ; then
+
+    plt=$(platform)
+
+fi
+
+if [[ -z ${plt} ]] ; then
+
+    color_echo red "Undetermined platform, aborting operations!"
+    exit 1
+
+fi
+
+#
+mkdir -p ${dir}/archive
+
+echo "Preparing ${ver} ${bld} build, for ${plt}"
+
+#
+# source archive -- no platform in the name, because source is portable
+#
+echo -n "Building source archive ... "
+#
+cd ${dir}/ && tar -zcf ${dir}/archive/${prj}.${ver}.source.tgz CMakeLists.txt README.md VERSION cmake configure source 2>/dev/null
+rc=$?
+cd ${dir}/archive/ && sha1 ${prj}.${ver}.source.tgz > ${prj}.${ver}.source.sha
+#
+if [[ ${rc} -eq 0 ]] ; then
+
+    echo "done"
+
+else
+
+    echo "failed"
+    exit 1
+
+fi
+
+#
+echo -n "Cleaning previous build ... "
+clean_build
+echo "done"
+
+#
+echo -n "Collecting libraries ... "
+collect_libs
+echo "done"
+
+#
+# build archive -- carries platform AND build type, because it holds binaries
+# and shared objects that are specific to both
+#
+bld_tgz="${prj}.${ver}.${plt}.${bld}.tgz"
+bld_sha="${prj}.${ver}.${plt}.${bld}.sha"
+
+echo -n "Building ${bld} archive ... "
+#
+cd ${dir}/home && tar -zcf ${dir}/archive/${bld_tgz} . 2>/dev/null
+rc=$?
+cd ${dir}/archive/ && sha1 ${bld_tgz} > ${bld_sha}
+#
+if [[ ${rc} -eq 0 ]] ; then
+
+    echo "done"
+
+else
+
+    echo "failed"
+    exit 1
+
+fi
+
+#
+# On a release, wrap everything built so far into one platform specific
+# distribution. The debug archive is folded in when ./construct has already
+# produced it; on its own, ./dist release just bundles source + release.
+#
+if [[ "${bld}" == "release" ]] ; then
+
+    final_tgz="${prj}.${ver}.${plt}.tgz"
+    final_sha="${prj}.${ver}.${plt}.sha"
+    final_md="${dir}/archive/${prj}.${ver}.${plt}.md"
+
+    echo -n "Building distribution ... "
+
+    bundle=""
+
+    for f in ${prj}.${ver}.source.tgz     ${prj}.${ver}.source.sha \
+             ${prj}.${ver}.${plt}.debug.tgz   ${prj}.${ver}.${plt}.debug.sha \
+             ${prj}.${ver}.${plt}.release.tgz ${prj}.${ver}.${plt}.release.sha ; do
+
+        if [[ -f ${dir}/archive/${f} ]] ; then
+
+            bundle="${bundle} ${f}"
+
+        fi
+
+    done
+
+    ( cd ${dir}/archive/ && tar -zcf ${final_tgz} ${bundle} 2>/dev/null )
+
+    if [[ ! -f ${dir}/archive/${final_tgz} ]] ; then
+
+        echo "failed"
+        color_echo red "Could not create the platform distribution"
+        exit 1
+
+    fi
+
+    ( cd ${dir}/archive/ && sha1 ${final_tgz} > ${final_sha} )
+
+    echo "done"
+
+    #
+    # Release note for this platform. ./merge reads these back, one per
+    # platform, and folds them into a single note -- so the checksum lines
+    # below have to stay greppable by archive name.
+    #
+    echo -n > ${final_md}
+
+    PLT=$( echo ${plt} | tr '[:lower:]' '[:upper:]' )
+
+    echo "## Version ${ver} for ${PLT} download"                                        >> ${final_md}
+    echo "The primary download for parq ${ver} on ${PLT}, containing everything needed" >> ${final_md}
+    echo "to get started, upgrade or patch."                                            >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+    cat ${dir}/archive/${final_sha}                                                     >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+    echo                                                                                >> ${final_md}
+
+    echo "### Source code"                                                              >> ${final_md}
+    echo "Build from source with CMake; see the README for build instructions."         >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+    cat ${dir}/archive/${prj}.${ver}.source.sha 2>/dev/null                             >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+    echo                                                                                >> ${final_md}
+
+    if [[ -f ${dir}/archive/${prj}.${ver}.${plt}.debug.sha ]] ; then
+
+        echo "### Debug build"                                                          >> ${final_md}
+        echo "Debug build with symbols, for diagnostics and troubleshooting."           >> ${final_md}
+        echo '```'                                                                      >> ${final_md}
+        cat ${dir}/archive/${prj}.${ver}.${plt}.debug.sha                               >> ${final_md}
+        echo '```'                                                                      >> ${final_md}
+        echo                                                                            >> ${final_md}
+
+    fi
+
+    echo "### Release build"                                                            >> ${final_md}
+    echo "Optimized release build for production use."                                  >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+    cat ${dir}/archive/${prj}.${ver}.${plt}.release.sha 2>/dev/null                      >> ${final_md}
+    echo '```'                                                                          >> ${final_md}
+
+    #
+    # Summary
+    #
+    echo
+    echo "${dir}/archive/"
+    ( cd ${dir}/archive/ && ls -lh ${final_tgz} ${final_sha} $( basename ${final_md} ) )
+    echo
+    echo "Verified: $( cd ${dir}/archive/ && sha1 -c ${final_sha} 2>/dev/null || echo "${final_tgz}: OK" )"
+    echo
+    color_echo green "Run ./merge to turn the per-platform notes into a single release note"
+
+else
+
+    echo
+    echo "${dir}/archive/"
+    ( cd ${dir}/archive/ && ls -lh ${bld_tgz} ${bld_sha} )
+    echo
+    color_echo green "Debug build archived; run ./configure clean && ./configure release && ./dist release to complete the distribution"
+
+fi
+
+echo
+echo __$(date)__
+echo

@@ -1,0 +1,182 @@
+#!/bin/bash
+
+# 
+# construct
+# ~~~~~~~~~~~~~~~~~~~~~
+# 
+# Copyright (c) 2004-2025 Metasystems Technologies Inc. (MTI)
+# All rights reserved
+# 
+# Distributed under the MTI Software License, Version 0.1.
+# 
+# as defined by accompanying file MTI-LICENSE-0.1.info or
+# at http://www.mtihq.com/license/MTI-LICENSE-0.1.info
+# 
+
+#
+# Builds both a debug and a release build, then wraps the two of them -- plus
+# the source -- into a single platform specific distribution.
+#
+# Each build is done from a clean tree, because home/bin holds one binary at a
+# time: ./dist archives whatever is there before the next ./configure clean
+# replaces it.
+#
+
+prj=parq
+tim=$SECONDS
+dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+
+cd ${dir}/
+
+#
+function color_echo()
+{
+    local color=$1;
+    local exp=$2;
+
+    if ! [[ $color =~ '^[0-9]$' ]] ; then
+
+        case $(echo $color | tr '[:upper:]' '[:lower:]') in
+              black) color=0 ;;
+                red) color=1 ;;
+              green) color=2 ;;
+             yellow) color=3 ;;
+               blue) color=4 ;;
+            magenta) color=5 ;;
+               cyan) color=6 ;;
+            white|*) color=7 ;;
+        esac
+
+    fi
+
+    tput setaf $color;
+    echo "$exp";
+    tput sgr0;
+}
+
+#
+function show_time()
+{
+    local val=$1
+
+    local dy=0
+    local hr=0
+    local mi=0
+    local ss=0
+
+    #
+    if ((val>59)) ; then
+
+        #
+        ((ss=val%60))
+        ((val=val/60))
+
+        #
+        if ((val>59)) ; then
+
+            #
+            ((mi=val%60))
+            ((val=val/60))
+
+            #
+            if ((val>23)) ; then
+
+                #
+                ((hr=val%24))
+                ((dy=val/24))
+
+            else
+
+                #
+                ((hr=val))
+
+            fi
+
+        else
+
+            #
+            ((mi=val))
+
+        fi
+
+    else
+
+        #
+        ((ss=val))
+
+    fi
+
+    #
+    printf "%d day(s), %02d:%02d:%02d\n" ${dy} ${hr} ${mi} ${ss}
+}
+
+#
+function complete()
+{
+    echo
+    echo "Construct time: $(show_time $((SECONDS - tim)))"
+    echo "Construct date: $(date)"
+    echo
+}
+
+#
+function step()
+{
+    local what=$1
+    shift
+
+    echo
+    color_echo cyan "==> ${what}"
+
+    "${@}"
+
+    if [ $? -ne 0 ] ; then
+
+        echo
+        color_echo red "Failed: ${what}"
+        complete
+        exit 1
+
+    fi
+}
+
+#
+if [[ "${1}" == "-h" ]] || [[ "${1}" == "--help" ]] || [[ "${1}" == "-?" ]] ; then
+
+    echo "Usage: $0"
+    echo "    Builds ${prj} twice -- debug then release -- and wraps both, with"
+    echo "    the source, into one platform specific distribution in archive/"
+    echo
+    echo "    Equivalent to:"
+    echo "      ./configure clean && ./configure debug   && ./dist debug"
+    echo "      ./configure clean && ./configure release && ./dist release"
+    echo
+    echo "    Afterwards, ./merge turns the per-platform notes into a release note"
+    echo
+    exit 0
+
+fi
+
+#
+if [[ ! -x ${dir}/VERSION ]] ; then
+
+    color_echo red "No executable VERSION script at ${dir}/VERSION"
+    exit 1
+
+fi
+
+ver=$( "${dir}/VERSION" )
+
+echo
+color_echo green "Constructing ${prj} ${ver}"
+
+# debug first: ./dist release folds the debug archive in, so it has to exist
+step "Cleaning"         ./configure clean
+step "Building debug"   ./configure debug
+step "Archiving debug"  ./dist debug
+
+step "Cleaning"         ./configure clean
+step "Building release" ./configure release
+step "Archiving release, wrapping distribution" ./dist release
+
+complete
