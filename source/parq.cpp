@@ -404,6 +404,8 @@ int main(int argc, char* argv[])
             size_t idx_width = 5;  // for index
             size_t name_width = 20; // start with minimum
             size_t type_width = 15; // start with minimum
+            size_t dflt_width = 9;  // for the schema default
+            size_t null_width = 8;  // fits "NOT NULL"
             size_t comp_width = 12; // for compression
             
             // Find maximum widths
@@ -411,30 +413,44 @@ int main(int argc, char* argv[])
                 name_width = std::max(name_width, parquet_reader.name(i).length());
                 auto field = parquet_reader.field(i);
                 type_width = std::max(type_width, mti::parq::reader::to_type(field->type()).length());
+                dflt_width = std::max(dflt_width, parquet_reader.default_value(i).length());
             }
             
             // Add some padding
             name_width += 2;
             type_width += 2;
+            dflt_width += 2;
             
             // Print header
             std::cout << "  " << std::right << std::setw(idx_width) << "Index" << " | "
                       << std::left << std::setw(name_width) << "Column Name" << " | "
                       << std::setw(type_width) << "Data Type" << " | "
+                      << std::setw(dflt_width) << "Default" << " | "
+                      << std::setw(null_width) << "Null" << " | "
                       << std::setw(comp_width) << "Compression" << " |\n";
                       
             // Print separator line
             std::cout << "  " << std::string(idx_width, '-') << "-+-"
                       << std::string(name_width, '-') << "-+-"
                       << std::string(type_width, '-') << "-+-"
+                      << std::string(dflt_width, '-') << "-+-"
+                      << std::string(null_width, '-') << "-+-"
                       << std::string(comp_width, '-') << "-+\n";
             
             // Print column information
+            //
+            // NOTE: Default is blank rather than "n/a" where a format has no
+            // such concept -- parquet and orc record no per column default at
+            // all, so every row would otherwise carry the same filler. A blank
+            // also distinguishes "no default declared" from avro's "default:
+            // null", which prints as the word null.
             for (size_t i = 0; i < parquet_reader.num_cols(); i++) {
                 auto field = parquet_reader.field(i);
                 std::cout << "  " << std::right << std::setw(idx_width) << i << " | "
                           << std::left << std::setw(name_width) << parquet_reader.name(i) << " | "
                           << std::setw(type_width) << mti::parq::reader::to_type(field->type()) << " | "
+                          << std::setw(dflt_width) << parquet_reader.default_value(i) << " | "
+                          << std::setw(null_width) << (parquet_reader.is_nullable(i) ? "NULL" : "NOT NULL") << " | "
                           << std::setw(comp_width) << parquet_reader.compression_type(i) << " |\n";
             }
             

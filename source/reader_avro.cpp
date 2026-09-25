@@ -36,6 +36,7 @@
 #include <avro/ValidSchema.hh>
 #include <avro/Exception.hh>
 //
+#include "json.hpp"
 #include "reader_avro.hpp"
 
 //
@@ -86,6 +87,66 @@ avro::NodePtr effective( const avro::NodePtr& node )
     }
 
     return node;
+}
+
+// Per field facts that avro keeps in the schema rather than in the decoded
+// data: the declared default, and whether the field admits null.
+//
+// NOTE: avro-cpp does expose defaults through Node::defaultValueAt(), but that
+// indexes fieldsDefaultValues_ with no bounds check, and a field that declares
+// no default has no entry -- reading one is undefined behaviour, not an error,
+// and there is no public way to ask how many entries exist. The schema's own
+// JSON is both safe and exact, so parse that instead.
+struct field_schema
+{
+    std::string dflt;      // exactly as written in the schema; empty when absent
+    bool        nullable;
+};
+
+std::vector<field_schema> schema_fields( const avro::ValidSchema& schema, size_t cols )
+{
+    std::vector<field_schema> out( cols, field_schema{ std::string(), false } );
+
+    try
+    {
+        mti::json j = mti::json::parse( schema.toJson( false ) );
+
+        if ( ! j.contains( "fields" ) || ! j[ "fields" ].is_array() )
+            return out;
+
+        const mti::json& fs = j[ "fields" ];
+
+        for ( size_t i = 0; ( i < fs.size() ) && ( i < cols ); ++i )
+        {
+            const mti::json& f = fs[ i ];
+
+            // dump() rather than any string conversion, so the value reads the
+            // way the schema writes it -- a declared null default shows as
+            // "null", which is not the same as declaring no default at all
+            if ( f.contains( "default" ) )
+                out[ i ].dflt = f[ "default" ].dump();
+
+            // a bare type cannot hold null; only a union with a null branch can
+            if ( f.contains( "type" ) && f[ "type" ].is_array() )
+            {
+                for ( const mti::json& b : f[ "type" ] )
+                {
+                    if ( b.is_string() && ( b.get<std::string>() == "null" ) )
+                    {
+                        out[ i ].nullable = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    catch ( ... )
+    {
+        // a schema this cannot parse is not worth failing the read over; the
+        // two metadata columns simply stay empty
+    }
+
+    return out;
 }
 
 // Map an avro schema node onto the arrow type its values will be held in.
@@ -665,6 +726,21 @@ void avro_reader::open( const char* file )
         bool is_record = ( root->type() == avro::AVRO_RECORD );
         size_t cols = is_record ? root->leaves() : 1;
 
+        // defaults and nullability come from the schema, not the data, so they
+        // have to be taken here -- the schema is not retained past open()
+        std::vector<field_schema> fs = is_record
+                                     ? schema_fields( schema, cols )
+                                     : std::vector<field_schema>( cols, field_schema{ std::string(), false } );
+
+        defaults_.clear();
+        nullable_.clear();
+
+        for ( size_t i = 0; i < cols; ++i )
+        {
+            defaults_.push_back( fs[ i ].dflt );
+            nullable_.push_back( fs[ i ].nullable ? 1 : 0 );
+        }
+
         std::vector<std::shared_ptr<arrow::Field>> fields;
         std::vector<std::unique_ptr<arrow::ArrayBuilder>> builders;
         std::vector<std::shared_ptr<arrow::DataType>> types;
@@ -764,6 +840,9 @@ void avro_reader::close()
     created_ = "unknown";
     blocks_ = 0;
 
+    defaults_.clear();
+    nullable_.clear();
+
     //
     reader::close();
 }
@@ -778,6 +857,26 @@ size_t avro_reader::num_row_groups() const
 std::string avro_reader::created_by() const
 {
     return created_;
+}
+
+//
+std::string avro_reader::default_value( Index col ) const
+{
+    if ( col >= defaults_.size() )
+        return std::string();
+
+    return defaults_[ col ];
+}
+
+//
+bool avro_reader::is_nullable( Index col ) const
+{
+    // unknown ( a schema that did not parse ) is reported as nullable, which
+    // is the weaker claim of the two
+    if ( col >= nullable_.size() )
+        return true;
+
+    return ( nullable_[ col ] != 0 );
 }
 
 //

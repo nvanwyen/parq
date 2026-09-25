@@ -187,7 +187,7 @@ commit=$( git -C "${dir}" rev-parse --short HEAD 2>/dev/null )
 #
 echo
 echo "# Parquet Reader (parq), Version ${ver}"
-echo "A generic reader for Apache Parquet and Apache Avro files, with tabular, JSON, CSV and XML output."
+echo "A generic reader for Apache Parquet, Apache Avro and Apache Orc files, with tabular, JSON, CSV and XML output."
 echo
 
 echo "## Statistics"

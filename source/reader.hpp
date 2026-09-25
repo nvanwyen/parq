@@ -130,6 +130,21 @@ class reader
         // per column for parquet, file level for avro
         virtual std::string compression_type( Index col ) const = 0;
 
+        // The schema declared default for a column, as it is written in the
+        // schema ( so a declared null default reads "null", which is not the
+        // same as having no default at all -- that is an empty string ).
+        //
+        // Only avro has the concept: parquet and orc record no per column
+        // default anywhere in their metadata, so they never return one and
+        // the base implementation below is what they use.
+        virtual std::string default_value( Index col ) const;
+
+        // Whether the column's schema permits null. The base implementation
+        // reads arrow's own field flag, which parquet ( REQUIRED vs OPTIONAL )
+        // and orc both populate correctly. Avro overrides it because avro
+        // encodes nullability as a ["null", T] union rather than a flag.
+        virtual bool is_nullable( Index col ) const;
+
         //
         virtual void close();
 

@@ -15,6 +15,8 @@
 #define __MTI_PARQ_READER_AVRO_HPP__
 
 //
+#include <vector>
+//
 #include "reader.hpp"
 
 //
@@ -58,12 +60,23 @@ class avro_reader : public reader
         // the one file level codec
         std::string compression_type( Index col ) const override;
 
+        // the field's declared default, read from the schema on open
+        std::string default_value( Index col ) const override;
+
+        // avro spells nullability as a ["null", T] union, not a flag
+        bool is_nullable( Index col ) const override;
+
     protected:
     private:
         //
         std::string codec_;
         std::string created_;
         size_t blocks_;
+
+        // one entry per column, empty where the field declares no default.
+        // Captured on open because the schema is not retained afterwards.
+        std::vector<std::string> defaults_;
+        std::vector<char> nullable_;
 };
 
 }} // namespace mti::parq

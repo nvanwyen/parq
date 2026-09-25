@@ -679,6 +679,23 @@ int64_t reader::file_size() const
 }
 
 //
+// Formats with no per column default use this; only the avro reader overrides
+// it. Returning empty rather than something like "n/a" keeps the metadata
+// table blank for parquet and orc instead of filling a column with noise.
+std::string reader::default_value( Index ) const
+{
+    return std::string();
+}
+
+//
+bool reader::is_nullable( Index col ) const
+{
+    Field f = field( col );
+
+    return ( f != nullptr ) ? f->nullable() : true;
+}
+
+//
 std::string reader::file_checksum() const
 {
     std::string checksum = "";

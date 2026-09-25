@@ -1,5 +1,5 @@
 # parq
-A generic parquet, avro and ORC file reader
+A generic parquet, avro and orc file reader
 
 ```
 $ home/parq --help
