@@ -35,6 +35,7 @@ void print_usage(const char* program_name)
     std::cout << "Options:\n";
     std::cout << "  -p, --parquet            Input files are Parquet (default)\n";
     std::cout << "  -a, --avro               Input files are Avro\n";
+    std::cout << "  -o, --orc                Input files are ORC\n";
     std::cout << "  -t, --tabular            Output in tabular format (default)\n";
     std::cout << "  -j, --json               Output in JSON format\n";
     std::cout << "  -c, --csv                Output in CSV format\n";
@@ -208,6 +209,11 @@ int main(int argc, char* argv[])
             in_format = mti::parq::input_format::AVRO;
             in_format_count++;
         }
+        else if (arg == "--orc" || arg == "-o")
+        {
+            in_format = mti::parq::input_format::ORC;
+            in_format_count++;
+        }
         else if (arg == "--metadata" || arg == "-m")
             metadata_only = true;
         else if ((arg == "--columns" || arg == "-C") && i + 1 < argc)
@@ -249,14 +255,19 @@ int main(int argc, char* argv[])
 
     if (in_format_count > 1) {
         std::cerr << "Error: Input format options are mutually exclusive.\n";
-        std::cerr << "Please specify only one of --parquet or --avro.\n";
+        std::cerr << "Please specify only one of --parquet, --avro or --orc.\n";
         return 1;
     }
 
     if (!mti::parq::supported(in_format)) {
-        std::cerr << "Error: This build has no " << mti::parq::to_string(in_format)
-                  << " support.\n";
-        std::cerr << "Rebuild with -DWITH_AVRO=ON (requires the avro-cpp library).\n";
+        // make_reader() carries the remedy for the format that is missing, so
+        // ask it rather than repeating an avro specific hint here
+        try {
+            mti::parq::make_reader(in_format);
+        } catch (mti::parq::reader::exception& e) {
+            std::cerr << "Error: " << e.what() << "\n";
+        }
+
         return 1;
     }
 

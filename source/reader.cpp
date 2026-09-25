@@ -140,6 +140,43 @@ std::string format_time_of_day( int64_t value, arrow::TimeUnit::type unit )
     return os.str();
 }
 
+// Resolve a table global row number to the chunk that actually holds it.
+//
+// A column is a ChunkedArray and the chunking is not visible to the caller:
+// parquet normally comes back coalesced into a single chunk, but orc returns
+// one chunk per stripe, and arrow is free to split any column ( a binary
+// column crossing the 2 GB offset limit, for one ). Indexing chunk( 0 ) with a
+// table global row -- as this did -- is an out of bounds read the moment a
+// column has more than one chunk.
+bool locate( const std::shared_ptr<arrow::ChunkedArray>& col,
+             int64_t row,
+             std::shared_ptr<arrow::Array>& out,
+             int64_t& idx )
+{
+    if ( ( col == nullptr ) || ( row < 0 ) )
+        return false;
+
+    for ( int i = 0; i < col->num_chunks(); ++i )
+    {
+        std::shared_ptr<arrow::Array> chk = col->chunk( i );
+
+        if ( chk == nullptr )
+            return false;
+
+        if ( row < chk->length() )
+        {
+            out = chk;
+            idx = row;
+
+            return true;
+        }
+
+        row -= chk->length();
+    }
+
+    return false;
+}
+
 } // anonymous namespace
 
 //
@@ -326,203 +363,212 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 
         if ( dat != nullptr )
         {
+            // find the chunk holding this row before touching any of it
+            std::shared_ptr<arrow::Array> chk;
+            int64_t idx = 0;
+
+            if ( ! locate( dat, static_cast<int64_t>( row ), chk, idx ) )
+                throw reader::exception( OUT_OF_RANGE, "Column [" + std::to_string( col )
+                                                     + "], Row [" + std::to_string( row )
+                                                     + "] out of range!" );
+
             //
             switch ( dat->type()->id() )
             {
                 //
                 case arrow::Type::type::BOOL:
                     {
-                        auto ary = std::static_pointer_cast<arrow::BooleanArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::BooleanArray>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = ( ary->Value( row ) ? "true" : "false" );
+                            if ( ! ary->IsNull( idx ) )
+                                val = ( ary->Value( idx ) ? "true" : "false" );
                         }
                     }
                     break;
 
                 case arrow::Type::type::UINT8:
                     {
-                        auto ary = std::static_pointer_cast<arrow::UInt8Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::UInt8Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::INT8:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Int8Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Int8Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::UINT16:
                     {
-                        auto ary = std::static_pointer_cast<arrow::UInt16Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::UInt16Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::INT16:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Int16Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Int16Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::UINT32:
                     {
-                        auto ary = std::static_pointer_cast<arrow::UInt32Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::UInt32Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::INT32:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Int32Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Int32Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::UINT64:
                     {
-                        auto ary = std::static_pointer_cast<arrow::UInt64Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::UInt64Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::INT64:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Int64Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Int64Array>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::FLOAT:
                     {
-                        auto ary = std::static_pointer_cast<arrow::FloatArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::FloatArray>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::DECIMAL:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Decimal128Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Decimal128Array>( chk );
                         auto typ = std::static_pointer_cast<arrow::Decimal128Type>( dat->type() );
 
                         if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
                             // the scale belongs to the column type; assuming 0
                             // here would silently shift the decimal point
-                            if ( ! ary->IsNull( row ) )
-                                val = arrow::Decimal128( ary->Value( row ) ).ToString( typ->scale() );
+                            if ( ! ary->IsNull( idx ) )
+                                val = arrow::Decimal128( ary->Value( idx ) ).ToString( typ->scale() );
                         }
                     }
                     break;
 
                 case arrow::Type::type::DECIMAL256:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Decimal256Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Decimal256Array>( chk );
                         auto typ = std::static_pointer_cast<arrow::Decimal256Type>( dat->type() );
 
                         if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = arrow::Decimal256( ary->Value( row ) ).ToString( typ->scale() );
+                            if ( ! ary->IsNull( idx ) )
+                                val = arrow::Decimal256( ary->Value( idx ) ).ToString( typ->scale() );
                         }
                     }
                     break;
 
                 case arrow::Type::type::DOUBLE:
                     {
-                        auto ary = std::static_pointer_cast<arrow::DoubleArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::DoubleArray>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = std::to_string( ary->Value( row ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = std::to_string( ary->Value( idx ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::STRING:
                     {
-                        auto ary = std::static_pointer_cast<arrow::StringArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::StringArray>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = ary->Value( row );
+                            if ( ! ary->IsNull( idx ) )
+                                val = ary->Value( idx );
                         }
                     }
                     break;
 
                 case arrow::Type::type::BINARY:
                     {
-                        auto ary = std::static_pointer_cast<arrow::BinaryArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::BinaryArray>( chk );
 
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = mti::crypto::b64().encode( std::string( ary->Value( row ) ) );
+                            if ( ! ary->IsNull( idx ) )
+                                val = mti::crypto::b64().encode( std::string( ary->Value( idx ) ) );
                         }
                     }
                     break;
 
                 case arrow::Type::type::DATE32:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Date32Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Date32Array>( chk );
 
                         // days since the epoch
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = format_instant( static_cast<int64_t>( ary->Value( row ) ) * 86400LL,
+                            if ( ! ary->IsNull( idx ) )
+                                val = format_instant( static_cast<int64_t>( ary->Value( idx ) ) * 86400LL,
                                                       "%Y-%m-%d" );
                         }
                     }
@@ -530,13 +576,13 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 
                 case arrow::Type::type::DATE64:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Date64Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Date64Array>( chk );
 
                         // milliseconds since the epoch
                         if ( ary != nullptr )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = format_instant( floor_div( ary->Value( row ), 1000LL ),
+                            if ( ! ary->IsNull( idx ) )
+                                val = format_instant( floor_div( ary->Value( idx ), 1000LL ),
                                                       "%Y-%m-%d" );
                         }
                     }
@@ -544,16 +590,16 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 
                 case arrow::Type::type::TIMESTAMP:
                     {
-                        auto ary = std::static_pointer_cast<arrow::TimestampArray>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::TimestampArray>( chk );
                         auto typ = std::static_pointer_cast<arrow::TimestampType>( dat->type() );
 
                         // the unit is part of the column type, not fixed
                         if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
-                            if ( ! ary->IsNull( row ) )
+                            if ( ! ary->IsNull( idx ) )
                             {
                                 int64_t per = units_per_second( typ->unit() );
-                                int64_t raw = ary->Value( row );
+                                int64_t raw = ary->Value( idx );
 
                                 val = format_instant( floor_div( raw, per ), "%Y-%m-%d %H:%M:%S" )
                                     + fraction( floor_mod( raw, per ), per );
@@ -564,28 +610,28 @@ std::string reader::value( reader::Index col, reader::Index row ) const
 
                 case arrow::Type::type::TIME32:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Time32Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Time32Array>( chk );
                         auto typ = std::static_pointer_cast<arrow::Time32Type>( dat->type() );
 
                         // a time of day, not an instant
                         if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = format_time_of_day( ary->Value( row ), typ->unit() );
+                            if ( ! ary->IsNull( idx ) )
+                                val = format_time_of_day( ary->Value( idx ), typ->unit() );
                         }
                     }
                     break;
 
                 case arrow::Type::type::TIME64:
                     {
-                        auto ary = std::static_pointer_cast<arrow::Time64Array>( dat->chunk( 0 ) );
+                        auto ary = std::static_pointer_cast<arrow::Time64Array>( chk );
                         auto typ = std::static_pointer_cast<arrow::Time64Type>( dat->type() );
 
                         // a time of day, not an instant
                         if ( ( ary != nullptr ) && ( typ != nullptr ) )
                         {
-                            if ( ! ary->IsNull( row ) )
-                                val = format_time_of_day( ary->Value( row ), typ->unit() );
+                            if ( ! ary->IsNull( idx ) )
+                                val = format_time_of_day( ary->Value( idx ), typ->unit() );
                         }
                     }
                     break;

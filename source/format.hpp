@@ -28,13 +28,15 @@ namespace mti { namespace parq {
 enum class input_format
 {
     PARQUET,
-    AVRO
+    AVRO,
+    ORC
 };
 
 //
 std::string to_string( input_format fmt );
 
-// true when this build can read avro ( see the WITH_AVRO cmake option )
+// true when this build can read the format ( see the WITH_AVRO and WITH_ORC
+// cmake options )
 bool supported( input_format fmt );
 
 // Build the reader for a format. Throws reader::exception with NOT_SUPPORTED

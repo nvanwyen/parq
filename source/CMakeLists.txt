@@ -19,10 +19,20 @@ string(TOLOWER "${_app}" _app)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# NOTE: QUIET here is deliberate, not cosmetic. Arrow's own Findlz4Alt.cmake and
+# FindThriftAlt.cmake try config mode first and emit a multi-line CMake Warning
+# whenever a dependency ships no <Pkg>Config.cmake. Homebrew's lz4 and thrift
+# ship pkg-config files only, so that warning fires on every macOS configure --
+# and the very next line resolves the dependency through pkg-config anyway. The
+# warnings are alarming and say nothing actionable.
 #
-find_package(Arrow REQUIRED)
-find_package(Parquet REQUIRED)
-find_package(OpenSSL REQUIRED)
+# Those Find modules forward QUIET to the inner find_package ( see the
+# `if(lz4Alt_FIND_QUIETLY)` guard in each ), so asking quietly silences the
+# false alarm at the source. Everything the noise was burying is printed back
+# deliberately by the summary at the end of this file.
+find_package(Arrow REQUIRED QUIET)
+find_package(Parquet REQUIRED QUIET)
+find_package(OpenSSL REQUIRED QUIET)
 
 # Avro support is optional -- the reader is only compiled in when the avro-cpp
 # library is present and WITH_AVRO is on. Without it the binary still builds
@@ -60,18 +70,105 @@ if(WITH_AVRO)
         unset(CMAKE_REQUIRED_INCLUDES)
         unset(CMAKE_REQUIRED_QUIET)
 
-        if(AVRO_HAS_EXTENDED_TIMESTAMPS)
-            colormsg(HICYAN "  avro local/nanosecond timestamp logical types available")
-        else()
-            colormsg(HIRED "  avro-cpp predates local/nanosecond timestamps; those map to INT64")
+        if(NOT AVRO_HAS_EXTENDED_TIMESTAMPS)
+            colormsg(HIRED "avro-cpp predates local/nanosecond timestamps; those map to INT64")
         endif()
-        colormsg(HICYAN "Avro support enabled (avro-cpp ${avro-cpp_VERSION})")
     else()
         colormsg(HIRED "avro-cpp not found -- building without Avro support")
         colormsg(HIRED "  install it (brew install avro-cpp / dnf install avro-cpp-devel)")
         colormsg(HIRED "  or configure with -DWITH_AVRO=OFF to silence this")
     endif()
 endif()
+
+# ORC support is optional, and unusually it is not a separate library: arrow
+# carries the ORC adapter inside libarrow, but only when arrow itself was built
+# with ARROW_ORC=ON. That is a property of the installed arrow, not something a
+# consumer can ask for -- the ide7/ide8/ide9 images build arrow with it on,
+# homebrew's apache-arrow ships it off -- so probe for it and degrade the same
+# way avro does.
+option(WITH_ORC "Build with Apache ORC input support" ON)
+
+set(ORC_FOUND FALSE)
+
+if(WITH_ORC)
+    # find_package(Arrow) above pulls in arrow's own ArrowOptions.cmake, which
+    # records every option arrow was configured with. ARROW_ORC from there is
+    # the authoritative answer, so ask it rather than inferring one.
+    #
+    # NOTE: this used to be a check_cxx_source_compiles() that included the
+    # adapter header, and that gave a false negative from arrow 26 onward.
+    # Arrow 26 declares INTERFACE_COMPILE_FEATURES "cxx_std_20" and its headers
+    # use `requires`. The parq target inherits that through Arrow::arrow_shared
+    # and builds fine, but a bare compile check inherits nothing, so it ran at
+    # CMAKE_CXX_STANDARD (17) and failed inside arrow/util/iterator.h -- nowhere
+    # near ORC -- reporting an arrow that plainly had the adapter as lacking it.
+    if(DEFINED ARROW_ORC)
+        set(ORC_FOUND ${ARROW_ORC})
+    else()
+        # An arrow too old to export the option. The adapter header is only
+        # installed when the adapter was built, so its presence is the next best
+        # signal -- and looking for the file rather than compiling it keeps this
+        # independent of whatever standard arrow's own headers need.
+        get_target_property(_arrow_inc Arrow::arrow_shared INTERFACE_INCLUDE_DIRECTORIES)
+
+        find_file(_arrow_orc_header
+                  NAMES arrow/adapters/orc/adapter.h
+                  HINTS ${_arrow_inc}
+                  NO_CACHE)
+
+        if(_arrow_orc_header)
+            set(ORC_FOUND TRUE)
+        endif()
+    endif()
+
+    if(NOT ORC_FOUND)
+        colormsg(HIRED "this arrow was built without the ORC adapter -- building without ORC support")
+
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+            colormsg(HIRED "  homebrew's apache-arrow sets ARROW_ORC=OFF, so -o/--orc can never be")
+            colormsg(HIRED "  available against it -- build arrow from source with -DARROW_ORC=ON")
+        else()
+            colormsg(HIRED "  install an arrow built with ARROW_ORC=ON (the ide7/ide8/ide9 images are)")
+        endif()
+
+        colormsg(HIRED "  or configure with -DWITH_ORC=OFF to silence this")
+    endif()
+endif()
+
+# A short, deliberate summary of what this configure actually resolved.
+#
+# find_package(Arrow) drags arrow's whole transitive dependency graph in behind
+# it -- aws-sdk, brotli, s2n, thrift, openssl -- each printing its own status
+# lines, well over a hundred of them. The three facts that decide what this
+# binary can do are trivial to lose in that scroll, and one of them fails
+# silently: an arrow without the ORC adapter still configures and still builds,
+# just without -o. Printing which arrow was resolved makes that obvious.
+get_target_property(_arrow_lib Arrow::arrow_shared IMPORTED_LOCATION_RELEASE)
+
+if(NOT _arrow_lib)
+    get_target_property(_arrow_lib Arrow::arrow_shared IMPORTED_LOCATION)
+endif()
+
+if(AVRO_FOUND)
+    set(_avro_state "yes ( avro-cpp ${avro-cpp_VERSION} )")
+else()
+    set(_avro_state "NO  ( -a/--avro will report no avro support )")
+endif()
+
+if(ORC_FOUND)
+    set(_orc_state "yes ( adapter inside libarrow )")
+else()
+    set(_orc_state "NO  ( -o/--orc will report no orc support )")
+endif()
+
+message(STATUS "")
+colormsg(HICYAN "parq ${PROJECT_VERSION} -- build configuration")
+message(STATUS "  arrow    : ${ARROW_VERSION}")
+message(STATUS "  library  : ${_arrow_lib}")
+message(STATUS "  parquet  : ${PARQUET_VERSION} ( always available )")
+message(STATUS "  avro     : ${_avro_state}")
+message(STATUS "  orc      : ${_orc_state}")
+message(STATUS "")
 
 # NOTE: deliberately no include_directories(${PROJECT_DIRECTORY}/source) here.
 # Project headers are included with quotes and sit beside the sources, so they
@@ -97,6 +194,13 @@ if(AVRO_FOUND)
     if(AVRO_HAS_EXTENDED_TIMESTAMPS)
         target_compile_definitions(${PROJECT_NAME} PRIVATE AVRO_HAS_EXTENDED_TIMESTAMPS)
     endif()
+endif()
+
+# NOTE: no extra library to link -- the ORC adapter lives inside libarrow
+# itself, which is already linked below.
+if(ORC_FOUND)
+    target_sources(${PROJECT_NAME} PRIVATE reader_orc.cpp)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE WITH_ORC)
 endif()
 
 #

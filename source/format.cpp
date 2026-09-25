@@ -19,6 +19,10 @@
 #include "reader_avro.hpp"
 #endif
 
+#ifdef WITH_ORC
+#include "reader_orc.hpp"
+#endif
+
 //
 namespace mti { namespace parq {
 
@@ -28,6 +32,7 @@ std::string to_string( input_format fmt )
     switch ( fmt )
     {
         case input_format::AVRO:    return "avro";
+        case input_format::ORC:     return "orc";
         case input_format::PARQUET: return "parquet";
     }
 
@@ -41,6 +46,13 @@ bool supported( input_format fmt )
     {
         case input_format::AVRO:
 #ifdef WITH_AVRO
+            return true;
+#else
+            return false;
+#endif
+
+        case input_format::ORC:
+#ifdef WITH_ORC
             return true;
 #else
             return false;
@@ -65,6 +77,15 @@ reader_ptr make_reader( input_format fmt )
             throw reader::exception( NOT_SUPPORTED,
                 "This build has no avro support. Rebuild with -DWITH_AVRO=ON "
                 "( requires the avro-cpp library )." );
+#endif
+
+        case input_format::ORC:
+#ifdef WITH_ORC
+            return reader_ptr( new orc_reader() );
+#else
+            throw reader::exception( NOT_SUPPORTED,
+                "This build has no orc support. Rebuild against an arrow built "
+                "with ARROW_ORC=ON." );
 #endif
 
         case input_format::PARQUET:

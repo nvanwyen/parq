@@ -1,5 +1,5 @@
 # parq
-A generic parquet and avro file reader
+A generic parquet, avro and ORC file reader
 
 ```
 $ home/parq --help
@@ -7,6 +7,7 @@ Usage: /projects/parq/home/bin/parq [options] <file> [file2] [file3] ...
 Options:
   -p, --parquet            Input files are Parquet (default)
   -a, --avro               Input files are Avro
+  -o, --orc                Input files are ORC
   -t, --tabular            Output in tabular format (default)
   -j, --json               Output in JSON format
   -c, --csv                Output in CSV format
@@ -21,6 +22,104 @@ Note: Output format options are mutually exclusive.
       Input format options are mutually exclusive.
 Multiple files can be processed in sequence.
 ```
+
+## Building
+
+```
+./configure            # release build into home/bin
+./configure debug      # debug build
+./configure clean      # remove build/ and the generated home/bin, home/lib
+```
+
+Parquet is always available. Avro and ORC are optional: `./configure` probes for
+each and, when it cannot find one, still builds a working binary whose `-a` or
+`-o` reports that this build has no support for that format. The probe result is
+printed during configure, so it is never a silent downgrade.
+
+### Avro
+
+Needs `avro-cpp` (`brew install avro-cpp`, `dnf install avro-cpp-devel`, or the
+source build the ide images do). Turn it off explicitly with `-DWITH_AVRO=OFF`.
+
+### ORC
+
+ORC is unusual: there is no separate ORC package to install. The adapter lives
+*inside* libarrow, and only when arrow itself was built with `ARROW_ORC=ON`. An
+arrow either carries it or it does not, and nothing a consumer does afterwards
+can add it -- so the only fix for a missing adapter is a different arrow.
+
+`./configure` reads `ARROW_ORC` out of the `ArrowOptions.cmake` that arrow
+installs alongside its cmake config, which is arrow's own record of how it was
+configured.
+
+| Platform                     | ORC available | How |
+| ---------------------------- | ------------- | --- |
+| ide7 / ide8 / ide9 images     | yes           | arrow is built from source with `-DARROW_ORC=ON`, and the image build fails if the adapter header is missing |
+| macOS, homebrew apache-arrow  | no            | the homebrew formula sets `-DARROW_ORC=OFF` |
+| macOS, local tap ( below )    | yes           | the same formula with ORC turned on |
+
+#### ORC on macOS
+
+Homebrew's `apache-arrow` sets `ARROW_ORC=OFF`, so `-o/--orc` cannot work against
+it. Building arrow by hand instead is a trap on this platform: AppleClang searches
+`/usr/local/include` *before* the SDK, so a source build picks up whatever headers
+homebrew has installed ahead of arrow's own vendored copies -- flatbuffers and
+abseil in particular -- and fails in places that have nothing to do with ORC.
+
+The route that works is to let homebrew keep owning the dependency graph, and
+change only the one flag. Copy the real formula into a local tap:
+
+```
+brew tap-new mti/local
+cp "$( find ~/Library/Caches/Homebrew/api-source -path '*Formula/a/apache-arrow.rb' | head -1 )" \
+   "$( brew --repository mti/local )/Formula/apache-arrow-orc.rb"
+```
+
+Then edit that copy:
+
+- rename the class to `ApacheArrowOrc` so it installs beside the real keg
+- delete the `bottle do ... end` block ( no bottles exist under this name )
+- `-DARROW_ORC=OFF` becomes `-DARROW_ORC=ON`
+- add `-DORC_SOURCE=BUNDLED` -- the formula builds with
+  `ARROW_DEPENDENCY_SOURCE=SYSTEM`, and there is no `apache-orc` formula to
+  satisfy it, so ORC itself has to be fetched
+- add `-DHOMEBREW_ALLOW_FETCHCONTENT=ON` -- homebrew traps `FetchContent` in
+  sandboxed builds, and the line above needs it
+
+```
+brew install --build-from-source mti/local/apache-arrow-orc
+```
+
+That takes about six minutes, because every other dependency comes from kegs
+homebrew already built and keeps consistent with each other.
+
+Finally, make it the arrow the machine actually uses. Nothing else needs to
+depend on `apache-arrow` -- check with `brew uses --installed apache-arrow`:
+
+```
+brew uninstall apache-arrow
+brew link --force apache-arrow-orc
+```
+
+Installing is not the same as linking. Homebrew puts every formula in its own
+keg under `Cellar/` and then symlinks it into `/usr/local`; until that second
+step happens nothing can find it, and `./configure` will keep resolving the old
+arrow and report ORC as unavailable. The `library :` line in the configure
+summary is the one to check -- it prints which libarrow was actually resolved.
+
+Alternatively keep both and leave the new one keg-only, selecting it per build:
+
+```
+export CMAKE_PREFIX_PATH=/usr/local/opt/apache-arrow-orc
+```
+
+Either way, `-DWITH_ORC=OFF` builds quietly without ORC. Parquet and Avro are
+unaffected.
+
+Reading ORC timestamps also needs the IANA timezone database (`/usr/share/zoneinfo`)
+at run time -- ORC files record the writer's timezone and the reader resolves it.
+It is present in the ide images and on macOS; a stripped-down container may need
+`tzdata` installed.
 
 ## Examples
 The following are some simple example to help get you started.
